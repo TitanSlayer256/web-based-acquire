@@ -12,9 +12,27 @@
     <header>
         <h1 id="title">Welcome to Acquire</h1>
         <section id="networkRoomPanel" style="display: none" aria-label="Phone connections">
-            <p id="networkRoomStatus">Starting the phone connection…</p>
-            <div id="networkJoinLinks"></div>
-            <div id="networkPlayers" aria-live="polite"></div>
+            <div class="lobby-content-grid">
+                <section class="lobby-join-card" aria-label="Join this game">
+                    <p class="lobby-kicker">GAME LOBBY</p>
+                    <h2>Join the game</h2>
+                    <p id="networkRoomStatus">Starting the phone connection…</p>
+                    <div class="lobby-room-code" aria-label="Room code">
+                        <span>Room code</span>
+                        <strong id="networkRoomCodeDisplay">----</strong>
+                    </div>
+                    <div id="networkJoinLinks"></div>
+                </section>
+                <section class="lobby-roster-card" aria-label="Players in the lobby">
+                    <div class="lobby-roster-heading">
+                        <div>
+                            <p class="lobby-kicker">READY TO PLAY</p>
+                            <h2>Players</h2>
+                        </div>
+                    </div>
+                    <div id="networkPlayers" aria-live="polite"></div>
+                </section>
+            </div>
             <p id="networkActionStatus" role="status" aria-live="polite"></p>
         </section>
     </header>

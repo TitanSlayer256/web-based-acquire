@@ -260,27 +260,70 @@ body.network-host #skipTurnButton { display: block; }
 #newGameButton { display: none; margin: 8px auto; padding: 9px 14px; }
 body.network-host #newGameButton { display: block; }
 #networkRoomPanel {
-    max-width: 900px;
-    margin: 10px auto 0;
-    padding: 10px 14px;
-    border: 1px solid #aaa;
-    border-radius: 6px;
-    font-size: 14px;
+    max-width: 1120px;
+    margin: 14px auto 0;
+    padding: 18px;
+    border: 1px solid #cbd5e1;
+    border-radius: 16px;
+    background: linear-gradient(145deg, #f8fafc, #edf3fa);
+    box-shadow: 0 8px 24px rgb(30 41 59 / 8%);
+    font-size: 15px;
 }
-#networkRoomPanel p { margin: 4px 0; }
-#networkJoinLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
-#networkJoinLinks a { color: inherit; overflow-wrap: anywhere; }
+.lobby-content-grid { display: grid; grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.1fr); gap: 14px; }
+.lobby-join-card,
+.lobby-roster-card { min-width: 0; padding: 18px; border: 1px solid #d5deea; border-radius: 12px; background: #fff; }
+.lobby-join-card h2,
+.lobby-roster-card h2 { margin: 0 0 8px; text-align: left; }
+.lobby-kicker { margin: 0 0 5px; color: #5c6c80; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; }
+#networkRoomStatus { margin: 0 0 12px; color: #526174; line-height: 1.45; }
+.lobby-room-code { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 9px; background: #f3f6fa; }
+.lobby-room-code span { color: #526174; font-size: 13px; font-weight: 700; }
+.lobby-room-code strong { color: #17283e; font-size: clamp(1.6rem, 4vw, 2.2rem); letter-spacing: 0.18em; line-height: 1; }
+#networkJoinLinks { display: grid; gap: 8px; }
+#networkJoinLinks a { display: flex; width: fit-content; max-width: 100%; flex-direction: column; align-items: flex-start; justify-self: center; gap: 4px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1d4e89; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; text-align: left; text-decoration: none; }
+#networkJoinLinks a:hover { border-color: #7292b8; background: #f4f8fc; text-decoration: underline; }
+.lobby-network-label { color: #526174; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.lobby-network-url { overflow-wrap: anywhere; }
+.lobby-roster-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 #networkPlayers { margin-top: 8px; }
-.lobby-player-count { margin: 4px 0 8px; font-weight: bold; }
-.lobby-player-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.lobby-player-tile { display: flex; align-items: center; gap: 10px; min-width: 200px; padding: 9px 12px; border: 1px solid #888; border-radius: 7px; background: #fff; }
-.lobby-player-info { display: flex; flex: 1; flex-direction: column; gap: 3px; text-align: left; }
-.lobby-player-name { font-weight: bold; }
-.lobby-player-status { color: #555; font-size: 12px; }
-.lobby-kick-button { padding: 6px 10px; border: 1px solid #8a2929; border-radius: 5px; background: #fff0f0; color: #7a1717; cursor: pointer; }
-.lobby-kick-button:hover:not(:disabled) { background: #ffdada; }
+.lobby-player-count { display: inline-block; margin: 0 0 12px; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 999px; background: #eef4fa; color: #334a64; font-size: 13px; font-weight: 750; }
+.lobby-player-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 9px; }
+.lobby-player-tile { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid #cbd5e1; border-left: 4px solid #48a36b; border-radius: 9px; background: #fff; transition: background-color 120ms ease, border-color 120ms ease; }
+.lobby-player-tile.is-disconnected { border-left-color: #c18b3a; background: #fffaf1; }
+.lobby-player-info { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; text-align: left; }
+.lobby-player-name { overflow-wrap: anywhere; font-weight: 750; }
+.lobby-player-status { color: #39744f; font-size: 12px; }
+.lobby-player-tile.is-disconnected .lobby-player-status { color: #8a5b1d; }
+.lobby-empty-state { padding: 20px 12px; border: 1px dashed #b8c5d4; border-radius: 9px; background: #f8fafc; color: #526174; text-align: center; }
+.lobby-empty-state strong { display: block; margin-bottom: 5px; color: #26384e; font-size: 16px; }
+.lobby-kick-button { flex: 0 0 auto; padding: 7px 11px; border: 1px solid #d8aaaa; border-radius: 7px; background: #fff5f5; color: #8a2929; font-weight: 700; cursor: pointer; }
+.lobby-kick-button:hover:not(:disabled) { border-color: #bd7474; background: #ffe5e5; }
 .lobby-kick-button:focus-visible { outline: 3px solid #111; outline-offset: 2px; }
 .lobby-kick-button:disabled { cursor: wait; opacity: .6; }
+#networkActionStatus { min-height: 1.2em; margin: 8px 2px 0; color: #526174; text-align: center; }
+#startGameButton { margin-top: 10px; padding: 11px 24px; border: 0; border-radius: 8px; background: #758194; color: white; font-size: 16px; font-weight: 750; cursor: not-allowed; transition: background-color 120ms ease, transform 120ms ease; }
+#startGameButton:not(:disabled) { background: #287a4b; cursor: pointer; }
+#startGameButton:not(:disabled):hover { background: #20663e; transform: translateY(-1px); }
+#startGameButton:focus-visible { outline: 3px solid #17283e; outline-offset: 3px; }
+/* Once play starts, keep only the full reconnect links in the host header. */
+body.network-host.network-game-active #networkRoomPanel { width: fit-content; max-width: calc(100% - 20px); margin: 8px auto 0; padding: 8px 12px; border-color: #d5deea; background: #f8fafc; box-shadow: none; }
+body.network-host.network-game-active .lobby-content-grid { display: block; width: fit-content; max-width: 100%; margin: 0 auto; }
+body.network-host.network-game-active .lobby-join-card { width: fit-content; max-width: 100%; padding: 0; border: 0; background: transparent; }
+body.network-host.network-game-active .lobby-join-card > .lobby-kicker,
+body.network-host.network-game-active .lobby-join-card > h2,
+body.network-host.network-game-active #networkRoomStatus,
+body.network-host.network-game-active .lobby-room-code,
+body.network-host.network-game-active .lobby-roster-card,
+body.network-host.network-game-active #networkActionStatus { display: none; }
+body.network-host.network-game-active #networkJoinLinks { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; align-items: flex-start; justify-content: center; gap: 6px; }
+body.network-host.network-game-active #networkJoinLinks a { justify-self: auto; padding: 7px 10px; font-size: 12px; }
+@media (max-width: 760px) {
+    #networkRoomPanel { margin: 10px 10px 0; padding: 10px; }
+    .lobby-content-grid { grid-template-columns: 1fr; gap: 10px; }
+    .lobby-join-card, .lobby-roster-card { padding: 14px; }
+    .lobby-player-grid { grid-template-columns: 1fr; }
+    #startGameButton { width: 100%; }
+}
 body.phone-client { background: #f4f4f4; }
 body.phone-client header { padding: 12px; }
 body.phone-client header h1 { font-size: 1.4rem; }
@@ -304,3 +347,39 @@ body.phone-client #phoneScreen { display: block !important; max-width: 620px; he
 .phone-stock-stepper { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .phone-panel button.phone-stock-step { min-width: 44px; min-height: 44px; margin: 0; padding: 4px; font-size: 1.25rem; }
 .phone-stock-value { min-width: 2rem; padding: 6px 3px; border: 1px solid #777; border-radius: 4px; background: #fff; text-align: center; font-weight: bold; }
+
+/* Game board presentation: larger, framed cells that remain easy to scan from a distance. */
+body.network-host #gameBoardScreen { width: min(1500px, 100%); height: auto; margin: 0 auto; padding: 0 16px 24px; }
+body.network-host #gameBoardScreen > #turnStatus { max-width: 1050px; margin: 18px auto 14px; padding: 14px 20px; border: 1px solid #bfd0e3; border-left: 6px solid #2f6da5; border-radius: 10px; background: linear-gradient(100deg, #f2f7fc, #fff); color: #1d344d; font-size: clamp(18px, 2vw, 25px); line-height: 1.35; box-shadow: 0 4px 14px rgb(30 41 59 / 7%); }
+body.network-host #grid-container { grid-template-columns: repeat(12, clamp(50px, 3.4vw, 64px)) !important; gap: clamp(3px, 0.35vw, 7px); width: max-content; max-width: 100%; margin: 20px auto 26px; padding: 14px; border: 1px solid #cbd5e1; border-radius: 14px; background: #f7f9fc; box-shadow: 0 8px 24px rgb(30 41 59 / 10%); }
+body.network-host #grid-container .box { box-sizing: border-box; width: auto; height: auto; aspect-ratio: 1; border: 1px solid #667085; border-radius: 5px; font-size: clamp(12px, 1vw, 16px); transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease; }
+body.network-host #grid-container .box:not(:disabled):hover { z-index: 1; filter: brightness(0.94); transform: scale(1.06); box-shadow: 0 2px 8px rgb(15 23 42 / 25%); }
+body.network-host #grid-container .box:disabled { cursor: default; }
+body.network-host #grid-container .box.selected { z-index: 2; outline: 4px solid #f0ad24; outline-offset: 1px; box-shadow: 0 0 0 3px white, 0 0 0 6px #f0ad24; }
+body.network-host #economyArea { grid-template-columns: repeat(2, minmax(300px, 1fr)); gap: 16px; max-width: 1250px; margin: 22px auto; }
+body.network-host #economyArea > div { min-width: 0; padding: 16px; border: 1px solid #d5deea; border-radius: 12px; background: #f8fafc; box-shadow: 0 4px 14px rgb(30 41 59 / 6%); }
+body.network-host #economyArea h2 { margin: 0 0 12px; color: #26384e; font-size: 20px; }
+body.network-host #playerSummary,
+body.network-host #companySummary { gap: 9px; }
+body.network-host #economyArea .summary-card { min-height: 44px; padding: 10px 12px; border-color: #d5deea; border-radius: 8px; box-shadow: 0 1px 3px rgb(30 41 59 / 5%); line-height: 1.4; }
+body.network-host #companySummary .summary-card { justify-content: flex-start; }
+body.network-host #companySummary .company-color-dot { width: 20px; height: 20px; border-radius: 5px; }
+body.network-host #stockPurchaseArea,
+body.network-host #mergerResolutionArea,
+body.network-host #gameOverArea { max-width: 850px; padding: 20px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgb(30 41 59 / 9%); }
+body.network-host #stockPurchaseArea h2,
+body.network-host #mergerResolutionArea h2,
+body.network-host #gameOverArea h2 { color: #26384e; }
+body.network-host #skipTurnButton,
+body.network-host #newGameButton { border: 1px solid #aebdce; border-radius: 7px; background: #fff; color: #293d55; font-weight: 700; cursor: pointer; }
+body.network-host #skipTurnButton:hover:not(:disabled),
+body.network-host #newGameButton:hover:not(:disabled) { background: #eef4fa; }
+
+@media (max-width: 760px) {
+    body.network-host #gameBoardScreen { padding: 0 8px 18px; }
+    body.network-host #gameBoardScreen > #turnStatus { margin: 12px 4px; padding: 11px 13px; font-size: 17px; }
+    body.network-host #grid-container { grid-template-columns: repeat(12, 34px) !important; gap: 2px; justify-content: start; width: max-content; max-width: 100%; margin: 14px 0 20px; padding: 8px; overflow-x: auto; }
+    body.network-host #grid-container .box { font-size: 10px; }
+    body.network-host #economyArea { grid-template-columns: 1fr; gap: 10px; margin: 14px auto; padding: 0 4px; }
+    body.network-host #economyArea > div { padding: 12px; }
+}

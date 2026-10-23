@@ -1117,11 +1117,14 @@ function updateHostRoomPanel(room) {
     persistHostRoomSession(remotePlayers);
     const status = document.getElementById("networkRoomStatus");
     const players = document.getElementById("networkPlayers");
-    if (status) status.textContent = `Phone room ${networkRoomCode} — share a link with players on this Wi-Fi.`;
+    const roomCodeDisplay = document.getElementById("networkRoomCodeDisplay");
+    if (roomCodeDisplay) roomCodeDisplay.textContent = networkRoomCode || "----";
+    if (status) status.textContent = "Share a link for a network connection below.";
     if (players) {
         const count = Number(document.getElementById("playerSelect")?.value || 2);
         const online = remotePlayers.filter(player => player.connected).length;
         const lobby = !playerData.length && !gameOver;
+        document.body.classList.toggle("network-game-active", Boolean(playerData.length));
         players.hidden = !lobby;
         if (lobby) {
             const signature = remotePlayers.map(player => `${player.id}:${player.name}`).join("|");
@@ -1131,6 +1134,16 @@ function updateHostRoomPanel(room) {
                 const summary = document.createElement("p");
                 summary.className = "lobby-player-count";
                 players.appendChild(summary);
+                if (!remotePlayers.length) {
+                    const emptyState = document.createElement("div");
+                    emptyState.className = "lobby-empty-state";
+                    const title = document.createElement("strong");
+                    title.textContent = "Waiting for players";
+                    const instructions = document.createElement("span");
+                    instructions.textContent = "Players can enter the room code or open a join link to take a seat.";
+                    emptyState.append(title, instructions);
+                    players.appendChild(emptyState);
+                }
                 const grid = document.createElement("div");
                 grid.className = "lobby-player-grid";
                 for (const player of remotePlayers) {
@@ -1168,6 +1181,8 @@ function updateHostRoomPanel(room) {
                 if (tile) {
                     tile.name.textContent = player.name;
                     tile.connection.textContent = player.connected ? "Connected" : "Disconnected";
+                    tile.tile.classList.toggle("is-connected", player.connected);
+                    tile.tile.classList.toggle("is-disconnected", !player.connected);
                 }
             }
         } else {
@@ -1240,16 +1255,30 @@ async function startHostNetwork() {
             document.getElementById("networkRoomStatus").textContent = "A saved game was found but could not be restored. It remains saved; use New Game only if you want to discard it.";
         }
         const status = document.getElementById("networkRoomStatus");
+        const roomCodeDisplay = document.getElementById("networkRoomCodeDisplay");
+        if (roomCodeDisplay) roomCodeDisplay.textContent = room.code;
         const restoreWarning = savedGame && !playerData.length;
-        if (!restoreWarning) status.textContent = `Players: connect to this Wi-Fi and open one of these links. Room code: ${room.code}`;
+        if (!restoreWarning) status.textContent = "Share a link for a network connection below.";
         const links = document.getElementById("networkJoinLinks");
         links.replaceChildren();
         for (const address of room.addresses) {
             const link = document.createElement("a");
             link.href = `http://${address.address}:${room.port}/?join=${room.code}`;
-            // Show the complete destination so a player can copy the room code
-            // query as well as the laptop's network address.
-            link.textContent = `${address.name}: ${link.href}`;
+            link.className = "lobby-network-link";
+            const interfaceName = String(address.name || "");
+            const networkType = /wi.?fi|wireless|wlan/i.test(interfaceName)
+                ? "Wi-Fi"
+                : /ethernet|local area connection|\blan\b/i.test(interfaceName)
+                    ? "Ethernet"
+                    : interfaceName || "Network";
+            const label = document.createElement("span");
+            label.className = "lobby-network-label";
+            label.textContent = networkType;
+            const destination = document.createElement("span");
+            destination.className = "lobby-network-url";
+            destination.textContent = link.href;
+            link.append(label, destination);
+            link.setAttribute("aria-label", `${networkType} reconnect link: ${link.href}`);
             link.title = `Open this complete phone join link for room ${room.code}`;
             // Keep the laptop host page alive when testing a client on this computer.
             link.target = "_blank";
@@ -1259,7 +1288,14 @@ async function startHostNetwork() {
         if (!room.addresses.length) {
             const link = document.createElement("a");
             link.href = `${window.location.origin}/?join=${room.code}`;
-            link.textContent = `Join room ${room.code}`;
+            link.className = "lobby-network-link";
+            const label = document.createElement("span");
+            label.className = "lobby-network-label";
+            label.textContent = "Current connection";
+            const destination = document.createElement("span");
+            destination.className = "lobby-network-url";
+            destination.textContent = link.href;
+            link.append(label, destination);
             links.appendChild(link);
             status.textContent = `No Wi-Fi address was detected. Use the room code ${room.code} and the laptop's Wi-Fi address.`;
         }
