@@ -10,8 +10,14 @@
 <body>
     <!-- The JavaScript updates this heading when the game starts. -->
     <header>
-        <h1 id="title">Welcome to Acquire Banking App</h1>
+        <h1 id="title">Welcome to Acquire</h1>
+        <section id="networkRoomPanel" style="display: none" aria-label="Phone connections">
+            <p id="networkRoomStatus">Starting the phone connection…</p>
+            <div id="networkJoinLinks"></div>
+            <p id="networkPlayers"></p>
+        </section>
     </header>
+    <main id="phoneScreen" style="display: none" aria-live="polite"></main>
     <main>
         <!-- Setup screen: choose the number of players before dealing the game. -->
         <div id="startScreen">
@@ -31,6 +37,7 @@
         <div id="gameBoardScreen" style="display: none">
             <!-- Live instructions tell the current player what action is expected. -->
             <p id="turnStatus" aria-live="polite"></p>
+            <button id="skipTurnButton" type="button" disabled>Skip current turn</button>
             <!-- Only appears when the game-end rule is met. -->
             <button id="endGameButton" type="button" style="display: none">Declare game over</button>
             <!-- Final score and payout details are filled in after confirmation. -->

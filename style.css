@@ -251,3 +251,44 @@ footer {
     height: 60px;
     color: #555;
 }
+
+/* Network additions keep the original board layout intact on the host display. */
+body.network-host #handArea { display: none; }
+body.network-host #stockPurchaseArea { display: none !important; }
+#skipTurnButton { display: none; margin: 8px auto; padding: 9px 14px; }
+body.network-host #skipTurnButton { display: block; }
+#networkRoomPanel {
+    max-width: 900px;
+    margin: 10px auto 0;
+    padding: 10px 14px;
+    border: 1px solid #aaa;
+    border-radius: 6px;
+    font-size: 14px;
+}
+#networkRoomPanel p { margin: 4px 0; }
+#networkJoinLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
+#networkJoinLinks a { color: inherit; overflow-wrap: anywhere; }
+#networkPlayers { font-weight: bold; }
+body.phone-client { background: #f4f4f4; }
+body.phone-client header { padding: 12px; }
+body.phone-client header h1 { font-size: 1.4rem; }
+body.phone-client #phoneScreen { display: block !important; max-width: 620px; height: auto; margin: 0 auto; padding: 12px; }
+.phone-panel { margin: 12px 0; padding: 14px; border: 1px solid #888; border-radius: 7px; background: white; }
+.phone-panel h2, .phone-panel h3 { margin: 0 0 10px; }
+.phone-hand { display: flex; flex-wrap: wrap; gap: 8px; }
+.phone-hand button { min-width: 54px; min-height: 42px; border: 2px solid #333; border-radius: 4px; cursor: pointer; }
+.phone-hand button.selected { outline: 3px solid #d18b00; }
+.phone-company-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.phone-company-button { min-height: 46px; padding: 8px 12px; border: 2px solid #333; border-radius: 5px; font-weight: bold; cursor: pointer; }
+.phone-company-button.selected { outline: 3px solid #111; outline-offset: 2px; }
+.phone-panel input, .phone-panel select { max-width: 100%; min-height: 42px; padding: 8px; font-size: 16px; }
+.phone-panel select { display: block; width: 100%; margin: 8px 0; }
+.phone-panel button { margin: 6px 4px 0 0; padding: 9px 13px; }
+.phone-status { font-weight: bold; }
+.phone-error { color: #a00; }
+.phone-stock-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; }
+.phone-stock-company { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid #555; border-radius: 5px; }
+.phone-stock-company span { font-size: 0.88rem; }
+.phone-stock-stepper { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.phone-panel button.phone-stock-step { min-width: 44px; min-height: 44px; margin: 0; padding: 4px; font-size: 1.25rem; }
+.phone-stock-value { min-width: 2rem; padding: 6px 3px; border: 1px solid #777; border-radius: 4px; background: #fff; text-align: center; font-weight: bold; }

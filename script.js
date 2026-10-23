@@ -16,6 +16,27 @@ let selectedTileName = null; // Name of the hand tile currently selected for pla
 let pendingTurn = false; // True while a player must finish buying shares or resolving a merger.
 let mergerState = null; // Temporary information needed while resolving a merger.
 const title = document.getElementById("title"); // Cache the page heading so start/reset can change it.
+// Network state is a thin transport around the existing laptop-side game logic.
+const phoneJoinCode = new URLSearchParams(window.location.search).get("join");
+const isPhoneClient = Boolean(phoneJoinCode);
+let networkEnabled = false;
+let networkRoomCode = "";
+let networkHostToken = "";
+let remotePlayers = [];
+let hostEventSource = null;
+let phoneEventSource = null;
+let phoneToken = "";
+let phoneState = null;
+let phoneSelectedTile = null;
+let phoneSelectedCompany = null;
+let phoneStockSelections = {};
+let phoneMergerSelections = { sell: 0, tradeShares: 0 };
+let phoneBusy = false;
+let phoneError = "";
+let phoneFormContext = "";
+let remoteCompanyChoice = null;
+let networkPublishTimer = null;
+let networkSnapshotRevision = 0;
 
 // These colors are shared by board tiles, hand previews, and company markers.
 const companyColors = {
@@ -220,13 +241,16 @@ function updateTileOwnership(itemName, newOwnership) {
 function initiatePlayerData() {
     playerData = [];
     for (let i = 0; i < playerCount; i++) {
-        const enteredName = prompt(`Enter player ${i + 1}'s name:`);
+        const connectedPlayer = networkEnabled ? remotePlayers[i] : null;
+        if (networkEnabled && !connectedPlayer) return false;
+        const enteredName = connectedPlayer ? connectedPlayer.name : prompt(`Enter player ${i + 1}'s name:`);
         if (enteredName === null) return false;
         const playerName = enteredName.trim() || `Player ${i + 1}`;
         const playerTiles = [];
         const player = {
             id: i,
             name: playerName,
+            networkPlayerId: connectedPlayer?.id ?? null,
             money: 6000,
             shares: Object.fromEntries(companies.map(company => [company.name, 0])), // Each company starts with zero shares held.
             playerTiles
@@ -427,6 +451,13 @@ function syncCompanySizes() {
 }
 // Fill and open the shared dropdown dialog; return the selected company ID after it closes.
 function chooseCompany(options, titleText) {
+    if (networkEnabled && !isPhoneClient) {
+        return new Promise(resolve => {
+            remoteCompanyChoice = { options: options.map(company => company.name), titleText, resolve };
+            updateSkipTurnButton();
+            publishNetworkSnapshot();
+        });
+    }
     const dialog = document.getElementById("companyChoiceDialog");
     const select = document.getElementById("companyChoiceSelect");
     document.getElementById("companyChoiceTitle").textContent = titleText;
@@ -582,6 +613,7 @@ async function showNextMergerPlayer() {
             tradeInput.oninput = updateMergerHoldSummary;
             updateMergerHoldSummary();
             document.getElementById("resolveMergerPlayerButton").disabled = false;
+            publishNetworkSnapshot();
             return;
         }
         mergerState.playerStep += 1;
@@ -879,6 +911,471 @@ function renderEconomy() {
         companiesElement.appendChild(card);
     }
     updateEndGameButton();
+    updateSkipTurnButton();
+    publishNetworkSnapshot();
+}
+
+// Keep the host override available only when advancing cannot interrupt a rule decision.
+function updateSkipTurnButton() {
+    const button = document.getElementById("skipTurnButton");
+    if (!button) return;
+    button.disabled = !networkEnabled || !playerData.length || gameOver || Boolean(mergerState || remoteCompanyChoice);
+}
+
+// Publish a read-only mirror of the existing game state for connected phones.
+// All rule checks and state changes still happen in this original browser game.
+function makeNetworkSnapshot() {
+    const players = playerData.map(player => ({
+        id: player.id,
+        name: player.name,
+        money: player.money,
+        shares: { ...player.shares },
+        hand: player.playerTiles.map(tileName => {
+            const tile = gameBoard.find(item => item.name === tileName);
+            const touched = companiesTileWouldTouch(tileName);
+            let background = "#fff";
+            let titleText = `Playing ${tileName}`;
+            if (touched.length === 1) {
+                background = companyColors[touched[0]];
+                titleText = `Playing this tile would add to ${companyDisplayName(touched[0])}`;
+            } else if (touched.length > 1) {
+                const slice = 100 / touched.length;
+                background = `conic-gradient(${touched.map((name, index) => `${companyColors[name]} ${index * slice}% ${(index + 1) * slice}%`).join(", ")})`;
+                titleText = `Playing this tile would merge ${touched.map(companyDisplayName).join(" and ")}`;
+            } else if (tile && tile.playability !== "unplayable" && wouldStartCompany(tileName)) {
+                background = "#999";
+                titleText = "Playing this tile would start a company";
+            }
+            return { name: tileName, background, title: titleText, unplayable: tile?.playability === "unplayable" };
+        })
+    }));
+    let pending = null;
+    if (remoteCompanyChoice) {
+        pending = { type: "choice", playerId: currentPlayerIndex, title: remoteCompanyChoice.titleText, choices: remoteCompanyChoice.options };
+    } else if (mergerState) {
+        const player = mergerState.playerOrder?.[mergerState.playerStep];
+        const survivor = companies.find(company => company.name === mergerState.survivorName);
+        pending = player ? {
+            type: "merger", playerId: player.id, playerName: player.name,
+            loser: mergerState.loserSnapshot.name, survivor: mergerState.survivorName,
+            shares: player.shares[mergerState.loserSnapshot.name] || 0,
+            maxTrades: Math.min(Math.floor((player.shares[mergerState.loserSnapshot.name] || 0) / 2), survivor?.sharesLeft || 0),
+            price: mergerState.loserSnapshot.price
+        } : { type: "busy" };
+    } else if (pendingTurn) {
+        pending = { type: "buy", playerId: currentPlayerIndex };
+    }
+    return {
+        phase: gameOver ? "finished" : playerData.length ? "playing" : "lobby",
+        board: gameBoard.filter(tile => tile.ownership === "board" || companies.some(company => company.name === tile.ownership)).map(tile => ({ name: tile.name, owner: tile.ownership })),
+        players,
+        companies: companies.map(company => ({ name: company.name, size: company.size, price: company.price, sharesLeft: company.sharesLeft, color: companyColors[company.name] })),
+        currentPlayerId: currentPlayerIndex,
+        pending,
+        winners: gameOver ? playerData.filter(player => player.money === Math.max(...playerData.map(item => item.money))).map(player => player.name) : []
+    };
+}
+
+function publishNetworkSnapshot() {
+    if (!networkEnabled || isPhoneClient || !networkRoomCode) return;
+    clearTimeout(networkPublishTimer);
+    networkPublishTimer = setTimeout(() => {
+        fetch("/api/snapshot", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ room: networkRoomCode, hostToken: networkHostToken, revision: ++networkSnapshotRevision, snapshot: makeNetworkSnapshot() })
+        }).catch(() => {});
+    }, 30);
+}
+
+function resolveRemoteCompany(name) {
+    if (!remoteCompanyChoice || !remoteCompanyChoice.options.includes(name)) return;
+    const pending = remoteCompanyChoice;
+    remoteCompanyChoice = null;
+    updateSkipTurnButton();
+    pending.resolve(name);
+}
+
+async function handleRemoteAction(action) {
+    if (action.type === "play") {
+        if (action.playerId !== currentPlayerIndex || pendingTurn || mergerState || remoteCompanyChoice) return;
+        onSelectTile(action.tile);
+        // placeTile may wait for a company choice from this same phone, so do not
+        // hold the event handler open while that pending choice is displayed.
+        placeTile(action.tile).catch(error => console.error("Remote tile action failed", error));
+        return;
+    }
+    if (action.type === "choice") {
+        resolveRemoteCompany(action.company);
+        return;
+    }
+    if (action.type === "buy") {
+        if (!pendingTurn || mergerState || action.playerId !== currentPlayerIndex) return;
+        for (const input of document.querySelectorAll("#stockPurchaseOptions input")) {
+            input.value = String(action.purchases?.find(item => item.company === input.dataset.company)?.quantity ?? 0);
+        }
+        finishTurn();
+        return;
+    }
+    if (action.type === "merger") {
+        const player = mergerState?.playerOrder?.[mergerState.playerStep];
+        if (!player || player.id !== action.playerId) return;
+        document.getElementById("mergerSellInput").value = String(action.sell || 0);
+        document.getElementById("mergerTradeInput").value = String(action.trade || 0);
+        await resolveMergerPlayer();
+    }
+}
+
+function updateHostRoomPanel(room) {
+    remotePlayers = room.players || [];
+    const status = document.getElementById("networkRoomStatus");
+    const players = document.getElementById("networkPlayers");
+    if (status) status.textContent = `Phone room ${networkRoomCode} — share a link with players on this Wi-Fi.`;
+    if (players) {
+        const count = Number(document.getElementById("playerSelect")?.value || 2);
+        const online = remotePlayers.filter(player => player.connected).length;
+        players.textContent = `${online} of ${count} selected players connected${remotePlayers.length ? `: ${remotePlayers.map(player => `${player.name}${player.connected ? "" : " (offline)"}`).join(", ")}` : ""}`;
+        const startButton = document.getElementById("startGameButton");
+        if (startButton) startButton.disabled = remotePlayers.length !== count || online !== count;
+    }
+    publishNetworkSnapshot();
+}
+
+async function startHostNetwork() {
+    document.body.classList.add("network-host");
+    const panel = document.getElementById("networkRoomPanel");
+    panel.style.display = "block";
+    const startButton = document.getElementById("startGameButton");
+    startButton.disabled = true;
+    try {
+        const response = await fetch("/api/host-room", { method: "POST" });
+        const room = await response.json();
+        if (!response.ok) throw new Error(room.error || "Could not start the phone room.");
+        networkRoomCode = room.code;
+        networkHostToken = room.hostToken;
+        networkEnabled = true;
+        const status = document.getElementById("networkRoomStatus");
+        status.textContent = `Players: connect to this Wi-Fi and open one of these links. Room code: ${room.code}`;
+        const links = document.getElementById("networkJoinLinks");
+        links.replaceChildren();
+        for (const address of room.addresses) {
+            const link = document.createElement("a");
+            link.href = `http://${address.address}:${room.port}/?join=${room.code}`;
+            // Show the complete destination so a player can copy the room code
+            // query as well as the laptop's network address.
+            link.textContent = `${address.name}: ${link.href}`;
+            link.title = `Open this complete phone join link for room ${room.code}`;
+            // Keep the laptop host page alive when testing a client on this computer.
+            link.target = "_blank";
+            link.rel = "noopener";
+            links.appendChild(link);
+        }
+        if (!room.addresses.length) {
+            const link = document.createElement("a");
+            link.href = `${window.location.origin}/?join=${room.code}`;
+            link.textContent = `Join room ${room.code}`;
+            links.appendChild(link);
+            status.textContent = `No Wi-Fi address was detected. Use the room code ${room.code} and the laptop's Wi-Fi address.`;
+        }
+        hostEventSource = new EventSource(`/api/events?room=${encodeURIComponent(networkRoomCode)}&host=${encodeURIComponent(networkHostToken)}`);
+        hostEventSource.addEventListener("roster", event => {
+            updateHostRoomPanel(JSON.parse(event.data));
+            startButton.disabled = false;
+        });
+        hostEventSource.addEventListener("action", event => {
+            const action = JSON.parse(event.data);
+            handleRemoteAction(action).catch(error => console.error("Remote action failed", error));
+        });
+    } catch (error) {
+        document.getElementById("networkRoomStatus").textContent = `Phone connection unavailable: ${error.message}`;
+    }
+}
+
+function phoneElement(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+}
+
+async function phoneRequest(path, data) {
+    const response = await fetch(path, data ? {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data)
+    } : undefined);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The request failed.");
+    return result;
+}
+
+function renderPhoneJoin(errorText = "") {
+    const screen = document.getElementById("phoneScreen");
+    screen.replaceChildren();
+    const panel = phoneElement("section", "phone-panel");
+    panel.appendChild(phoneElement("h2", "", "Join the Acquire game"));
+    const codeLabel = phoneElement("label", "", "Room code");
+    const codeInput = document.createElement("input");
+    codeInput.value = phoneJoinCode || "";
+    codeInput.maxLength = 8;
+    codeLabel.appendChild(codeInput);
+    const nameLabel = phoneElement("label", "", "Your name");
+    const nameInput = document.createElement("input");
+    nameInput.maxLength = 24;
+    nameInput.autocomplete = "nickname";
+    nameLabel.appendChild(nameInput);
+    panel.append(codeLabel, nameLabel);
+    const joinButton = phoneElement("button", "", "Join game");
+    joinButton.addEventListener("click", async () => {
+        joinButton.disabled = true;
+        try {
+            const joined = await phoneRequest("/api/join", { room: codeInput.value.trim().toUpperCase(), name: nameInput.value.trim() });
+            phoneToken = joined.token;
+            localStorage.setItem(`acquire.player.${joined.code}`, phoneToken);
+            connectPhone(joined.code);
+        } catch (error) { renderPhoneJoin(error.message); }
+    });
+    panel.appendChild(joinButton);
+    if (errorText || phoneError) panel.appendChild(phoneElement("p", "phone-error", errorText || phoneError));
+    screen.appendChild(panel);
+}
+
+function renderPhone() {
+    const screen = document.getElementById("phoneScreen");
+    const formContext = JSON.stringify([phoneState?.self?.id, phoneState?.pending]);
+    if (formContext !== phoneFormContext) {
+        phoneSelectedCompany = null;
+        phoneStockSelections = {};
+        phoneMergerSelections = { sell: 0, tradeShares: 0 };
+    }
+    phoneFormContext = formContext;
+    screen.replaceChildren();
+    if (!phoneState) return renderPhoneJoin();
+    const player = phoneState.self;
+    if (phoneState.phase === "lobby") {
+        const lobby = phoneElement("section", "phone-panel");
+        lobby.append(phoneElement("h2", "", player?.name || "Player connected"), phoneElement("p", "", `Room ${networkRoomCode}`));
+        lobby.appendChild(phoneElement("p", "phone-status", phoneState.hostConnected ? "Connected. Waiting for the host to start the game." : "The host page is reconnecting. Your seat is saved."));
+        screen.appendChild(lobby);
+        return;
+    }
+    if (!player) return renderPhoneJoin("This phone is not connected to a player seat.");
+    const heading = phoneElement("section", "phone-panel");
+    heading.append(phoneElement("h2", "", player.name), phoneElement("p", "", `Room ${networkRoomCode} · $${player.money.toLocaleString()}`));
+    const turnName = phoneState.players.find(item => item.id === phoneState.currentPlayerId)?.name;
+    heading.appendChild(phoneElement("p", "phone-status", phoneState.phase === "finished" ? `Game over${phoneState.winners.length ? ` — ${phoneState.winners.join(" and ")} won` : ""}` : phoneState.pending?.type === "merger" && phoneState.pending.playerId === player.id ? "Resolve the merger on your phone" : phoneState.pending?.type === "choice" && phoneState.pending.playerId === player.id ? phoneState.pending.title : phoneState.pending?.type === "buy" && phoneState.pending.playerId === player.id ? "Buy shares to finish your turn" : phoneState.currentPlayerId === player.id ? "Your turn" : `${turnName || "Waiting"} is taking their turn`));
+    screen.appendChild(heading);
+    const portfolio = phoneElement("section", "phone-panel");
+    portfolio.appendChild(phoneElement("h3", "", "Your shares"));
+    const holdings = Object.entries(player.shares || {}).filter(([, count]) => count > 0).map(([name, count]) => `${companyDisplayName(name)}: ${count}`);
+    portfolio.appendChild(phoneElement("p", "", holdings.join(" · ") || "No shares yet"));
+    screen.appendChild(portfolio);
+    const handPanel = phoneElement("section", "phone-panel");
+    const hasMouse = window.matchMedia?.("(pointer: fine)").matches;
+    const tileInstruction = !phoneState.canPlay
+        ? "Tile selection becomes available on your turn."
+        : hasMouse ? "Click a tile to place it." : "Tap a tile, then tap Play to place it.";
+    handPanel.append(phoneElement("h3", "", "Your tiles"), phoneElement("p", "", tileInstruction));
+    const hand = phoneElement("div", "phone-hand");
+    for (const tile of player.hand || []) {
+        const button = phoneElement("button", phoneSelectedTile === tile.name ? "selected" : "", tile.name);
+        button.type = "button";
+        button.style.background = tile.background;
+        button.title = tile.title;
+        button.setAttribute("aria-label", `${tile.name}. ${tile.title}`);
+        button.disabled = !phoneState.canPlay || phoneBusy || tile.unplayable;
+        button.addEventListener("click", () => {
+            if (hasMouse) sendPhoneAction({ type: "play", tile: tile.name });
+            else { phoneSelectedTile = tile.name; renderPhone(); }
+        });
+        hand.appendChild(button);
+    }
+    handPanel.appendChild(hand);
+    if (phoneState.canPlay && phoneSelectedTile) {
+        const play = phoneElement("button", "", `Play ${phoneSelectedTile}`);
+        play.disabled = phoneBusy;
+        play.addEventListener("click", () => sendPhoneAction({ type: "play", tile: phoneSelectedTile }));
+        handPanel.appendChild(play);
+    }
+    screen.appendChild(handPanel);
+    const pending = phoneState.pending;
+    if (pending?.type === "choice" && pending.playerId === player.id) {
+        const panel = phoneElement("section", "phone-panel");
+        panel.appendChild(phoneElement("h3", "", pending.title));
+        const choices = phoneElement("div", "phone-company-choices");
+        for (const name of pending.choices) {
+            const choice = phoneElement("button", `phone-company-button${phoneSelectedCompany === name ? " selected" : ""}`, companyDisplayName(name));
+            choice.type = "button";
+            choice.style.backgroundColor = companyColors[name] || "#ddd";
+            choice.setAttribute("aria-pressed", String(phoneSelectedCompany === name));
+            choice.disabled = phoneBusy;
+            choice.addEventListener("click", () => { phoneSelectedCompany = name; renderPhone(); });
+            choices.appendChild(choice);
+        }
+        const confirmText = pending.title.toLowerCase().includes("start") ? "Start company" : "Confirm choice";
+        const choose = phoneElement("button", "", confirmText);
+        choose.type = "button";
+        choose.disabled = !phoneSelectedCompany || phoneBusy;
+        choose.addEventListener("click", () => sendPhoneAction({ type: "choice", company: phoneSelectedCompany }));
+        panel.append(choices, choose); screen.appendChild(panel);
+    } else if (pending?.type === "buy" && pending.playerId === player.id) {
+        const panel = phoneElement("section", "phone-panel");
+        panel.appendChild(phoneElement("h3", "", "Buy up to 3 shares"));
+        panel.appendChild(phoneElement("p", "", "Choose any mix of shares. You may buy at most 3 total, limited by cash and available stock."));
+        const availableCompanies = phoneState.companies.filter(item => item.size > 0 && item.sharesLeft > 0);
+        const totalSelected = () => Object.values(phoneStockSelections).reduce((total, quantity) => total + quantity, 0);
+        const totalCost = () => phoneState.companies.reduce((total, company) => total + (phoneStockSelections[company.name] || 0) * company.price, 0);
+        for (const company of availableCompanies) {
+            const row = phoneElement("div", "phone-stock-row");
+            const tile = phoneElement("div", "phone-stock-company");
+            tile.style.backgroundColor = company.color || companyColors[company.name] || "#ddd";
+            tile.append(phoneElement("strong", "", companyDisplayName(company.name)), phoneElement("span", "", `$${company.price} each · ${company.sharesLeft} available`));
+            const stepper = phoneElement("div", "phone-stock-stepper");
+            const quantity = phoneStockSelections[company.name] || 0;
+            const decrement = phoneElement("button", "phone-stock-step", "−");
+            decrement.type = "button";
+            decrement.setAttribute("aria-label", `Buy one fewer ${companyDisplayName(company.name)} share`);
+            decrement.disabled = phoneBusy || quantity <= 0;
+            decrement.addEventListener("click", () => {
+                phoneStockSelections[company.name] = Math.max(0, quantity - 1);
+                renderPhone();
+            });
+            const value = phoneElement("output", "phone-stock-value", String(quantity));
+            value.setAttribute("aria-label", `${quantity} ${companyDisplayName(company.name)} shares selected`);
+            const increment = phoneElement("button", "phone-stock-step", "+");
+            increment.type = "button";
+            increment.setAttribute("aria-label", `Buy one more ${companyDisplayName(company.name)} share`);
+            increment.disabled = phoneBusy || totalSelected() >= 3 || quantity >= company.sharesLeft || totalCost() + company.price > player.money;
+            increment.addEventListener("click", () => {
+                phoneStockSelections[company.name] = quantity + 1;
+                renderPhone();
+            });
+            stepper.append(decrement, value, increment);
+            row.append(tile, stepper);
+            panel.appendChild(row);
+        }
+        if (!availableCompanies.length) panel.appendChild(phoneElement("p", "", "No shares are currently available."));
+        panel.appendChild(phoneElement("p", "phone-stock-summary", `${totalSelected()} of 3 shares selected — $${totalCost()} total; $${player.money} cash available.`));
+        const buy = phoneElement("button", "", "Finish turn");
+        buy.type = "button";
+        buy.disabled = phoneBusy;
+        buy.addEventListener("click", () => sendPhoneAction({
+            type: "buy",
+            purchases: availableCompanies.map(company => ({ company: company.name, quantity: phoneStockSelections[company.name] || 0 }))
+        }));
+        panel.appendChild(buy); screen.appendChild(panel);
+    } else if (pending?.type === "merger" && pending.playerId === player.id) {
+        const panel = phoneElement("section", "phone-panel");
+        panel.appendChild(phoneElement("h3", "", `${companyDisplayName(pending.loser)} is absorbed by ${companyDisplayName(pending.survivor)}`));
+        panel.appendChild(phoneElement("p", "", `You have ${pending.shares} ${companyDisplayName(pending.loser)} shares. Trading uses 2 shares for each 1 ${companyDisplayName(pending.survivor)} share.`));
+
+        const remainingShares = pending.shares - phoneMergerSelections.sell - phoneMergerSelections.tradeShares;
+        const sellRow = phoneElement("div", "phone-stock-row");
+        const sellTile = phoneElement("div", "phone-stock-company");
+        sellTile.style.backgroundColor = companyColors[pending.loser] || "#ddd";
+        sellTile.append(phoneElement("strong", "", `Sell ${companyDisplayName(pending.loser)}`), phoneElement("span", "", "1 share per step"));
+        const sellStepper = phoneElement("div", "phone-stock-stepper");
+        const sellDown = phoneElement("button", "phone-stock-step", "−");
+        sellDown.type = "button"; sellDown.setAttribute("aria-label", `Sell one fewer ${companyDisplayName(pending.loser)} share`);
+        sellDown.disabled = phoneBusy || phoneMergerSelections.sell <= 0;
+        sellDown.addEventListener("click", () => { phoneMergerSelections.sell -= 1; renderPhone(); });
+        const sellValue = phoneElement("output", "phone-stock-value", String(phoneMergerSelections.sell));
+        sellValue.setAttribute("aria-label", `${phoneMergerSelections.sell} shares selected to sell`);
+        const sellUp = phoneElement("button", "phone-stock-step", "+");
+        sellUp.type = "button"; sellUp.setAttribute("aria-label", `Sell one more ${companyDisplayName(pending.loser)} share`);
+        sellUp.disabled = phoneBusy || remainingShares <= 0;
+        sellUp.addEventListener("click", () => { phoneMergerSelections.sell += 1; renderPhone(); });
+        sellStepper.append(sellDown, sellValue, sellUp); sellRow.append(sellTile, sellStepper);
+
+        const tradeRow = phoneElement("div", "phone-stock-row");
+        const tradeTile = phoneElement("div", "phone-stock-company");
+        tradeTile.style.backgroundColor = companyColors[pending.survivor] || "#ddd";
+        tradeTile.append(phoneElement("strong", "", `Trade for ${companyDisplayName(pending.survivor)}`), phoneElement("span", "", `2 ${companyDisplayName(pending.loser)} shares per step · up to ${pending.maxTrades} trades`));
+        const tradeStepper = phoneElement("div", "phone-stock-stepper");
+        const tradeDown = phoneElement("button", "phone-stock-step", "−");
+        tradeDown.type = "button"; tradeDown.setAttribute("aria-label", `Trade two fewer ${companyDisplayName(pending.loser)} shares`);
+        tradeDown.disabled = phoneBusy || phoneMergerSelections.tradeShares <= 0;
+        tradeDown.addEventListener("click", () => { phoneMergerSelections.tradeShares -= 2; renderPhone(); });
+        const tradeValue = phoneElement("output", "phone-stock-value", String(phoneMergerSelections.tradeShares));
+        tradeValue.setAttribute("aria-label", `${phoneMergerSelections.tradeShares} shares selected to trade`);
+        const tradeUp = phoneElement("button", "phone-stock-step", "+");
+        tradeUp.type = "button"; tradeUp.setAttribute("aria-label", `Trade two more ${companyDisplayName(pending.loser)} shares`);
+        tradeUp.disabled = phoneBusy || remainingShares < 2 || phoneMergerSelections.tradeShares + 2 > pending.maxTrades * 2;
+        tradeUp.addEventListener("click", () => { phoneMergerSelections.tradeShares += 2; renderPhone(); });
+        tradeStepper.append(tradeDown, tradeValue, tradeUp); tradeRow.append(tradeTile, tradeStepper);
+
+        panel.append(sellRow, tradeRow);
+        panel.appendChild(phoneElement("p", "phone-stock-summary", `${remainingShares} ${companyDisplayName(pending.loser)} share${remainingShares === 1 ? "" : "s"} will be kept.`));
+        const confirm = phoneElement("button", "", "Confirm and continue");
+        confirm.type = "button"; confirm.disabled = phoneBusy;
+        confirm.addEventListener("click", () => sendPhoneAction({ type: "merger", sell: phoneMergerSelections.sell, trade: phoneMergerSelections.tradeShares / 2 }));
+        panel.appendChild(confirm); screen.appendChild(panel);
+    }
+    if (phoneState.phase === "lobby") screen.appendChild(phoneElement("section", "phone-panel", "You are connected. Waiting for the host to start the game."));
+    const connected = phoneElement("p", "", "Connected to the laptop host"); connected.id = "phoneConnectionStatus"; screen.appendChild(connected);
+    if (phoneError) screen.appendChild(phoneElement("p", "phone-error", phoneError));
+}
+
+async function sendPhoneAction(action) {
+    if (phoneBusy) return;
+    phoneBusy = true; renderPhone();
+    try {
+        const actionId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await phoneRequest("/api/action", { room: networkRoomCode, token: phoneToken, actionId, ...action });
+        phoneError = "";
+        phoneSelectedTile = null;
+    } catch (error) {
+        phoneError = error.message;
+    } finally { phoneBusy = false; renderPhone(); }
+}
+
+function connectPhone(code) {
+    networkRoomCode = code;
+    if (phoneEventSource) phoneEventSource.close();
+    phoneEventSource = new EventSource(`/api/events?room=${encodeURIComponent(code)}&token=${encodeURIComponent(phoneToken)}`);
+    phoneEventSource.addEventListener("state", event => { phoneState = JSON.parse(event.data); phoneError = ""; renderPhone(); });
+    phoneEventSource.onerror = () => { const status = document.getElementById("phoneConnectionStatus"); if (status) status.textContent = "Connection lost — reconnecting…"; };
+    phoneRequest(`/api/state?room=${encodeURIComponent(code)}&token=${encodeURIComponent(phoneToken)}`).then(state => { phoneState = state; renderPhone(); }).catch(error => { localStorage.removeItem(`acquire.player.${code}`); renderPhoneJoin(error.message); });
+}
+
+async function startPhoneClient() {
+    document.body.classList.add("phone-client");
+    document.querySelector("header #networkRoomPanel").style.display = "none";
+    for (const main of document.querySelectorAll("body > main:not(#phoneScreen)")) main.style.display = "none";
+    document.querySelector("footer").style.display = "none";
+    document.querySelector("#phoneScreen").style.display = "block";
+    networkRoomCode = phoneJoinCode.toUpperCase();
+    phoneToken = localStorage.getItem(`acquire.player.${networkRoomCode}`) || "";
+    if (phoneToken) connectPhone(networkRoomCode);
+    else renderPhoneJoin();
+}
+
+function startNetworkHost() {
+    startHostNetwork();
+    document.getElementById("playerSelect").addEventListener("change", () => updateHostRoomPanel({ players: remotePlayers }));
+}
+
+// The host can move past an unplayed turn or forfeit the share purchase after a tile was placed.
+function skipCurrentTurn() {
+    if (!networkEnabled || !playerData.length || gameOver || mergerState || remoteCompanyChoice) return;
+    const skippedPlayer = currentPlayer();
+    if (!skippedPlayer) return;
+
+    const tileWasPlayed = pendingTurn;
+    selectedTileName = null;
+    document.getElementById("stockPurchaseArea").style.display = "none";
+    if (tileWasPlayed) {
+        // advanceTurn draws the replacement tile owed for the completed placement.
+        advanceTurn();
+    } else {
+        // No placement means no replacement tile; the player's hand stays unchanged.
+        pendingTurn = false;
+        currentPlayerIndex = (currentPlayerIndex + 1) % playerData.length;
+        recalculatePlayability();
+        renderEconomy();
+        takeTurn();
+    }
+    const nextPlayer = currentPlayer();
+    document.getElementById("turnStatus").textContent = `Host skipped ${skippedPlayer.name}'s turn. ${nextPlayer?.name || "Next player"} is up.`;
+    updateSkipTurnButton();
 }
 
 // Show share options when possible; skip this phase if there are no shares or none are affordable.
@@ -922,6 +1419,7 @@ function showStockPurchase() {
     area.style.display = "block";
     updatePurchaseSummary();
     renderHand();
+    publishNetworkSnapshot();
 }
 
 // Recalculate the selected share count and cost as the player changes the quantity inputs.
@@ -996,6 +1494,10 @@ function advanceTurn() {
 
 // A fresh game resets all state, builds/deals the board, then begins with the first player.
 document.getElementById("startGameButton").onclick = function() {
+    if (networkEnabled && (remotePlayers.length !== Number(document.getElementById("playerSelect").value) || remotePlayers.some(player => !player.connected))) {
+        document.getElementById("networkPlayers").textContent = `Connect exactly ${document.getElementById("playerSelect").value} phones before starting.`;
+        return;
+    }
     // Reset existing tile objects so a second game can be started without reloading the page.
     gameBoard = gameBoard.map(tile => ({ ...tile, ownership: "unassigned", holderId: null, playability: "playable" }));
     playerData = [];
@@ -1013,7 +1515,7 @@ document.getElementById("startGameButton").onclick = function() {
     if (!initiatePlayerData()) {
         document.getElementById("startScreen").style.display = "block";
         document.getElementById("gameBoardScreen").style.display = "none";
-        title.innerText = "Welcome to Acquire Banking App";
+        title.innerText = "Welcome to Acquire";
         return;
     }
     syncCompanySizes();
@@ -1024,3 +1526,7 @@ document.getElementById("startGameButton").onclick = function() {
 document.getElementById("finishTurnButton").onclick = finishTurn;
 document.getElementById("resolveMergerPlayerButton").onclick = resolveMergerPlayer;
 document.getElementById("endGameButton").onclick = endGame;
+document.getElementById("skipTurnButton").onclick = skipCurrentTurn;
+
+if (isPhoneClient) startPhoneClient();
+else startNetworkHost();
