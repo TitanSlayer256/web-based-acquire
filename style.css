@@ -1,0 +1,253 @@
+/* Let the page scroll when the board and game panels need more space than the screen. */
+html, body {
+    overflow-y: auto; /* Allow vertical scrolling */
+}
+/* Keep the footer at the bottom when the page content is short. */
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+/* Center the player-count form and page title. */
+form {
+    text-align: center;
+}
+/* Center the main heading. */
+h1 {
+    text-align: center;
+}
+/* Give the game area room to grow and arrange its sections vertically. */
+main {
+    flex: 1; /* Allow main to grow and fill the space */
+    justify-content: center;
+    flex-direction: column; /* Stack items vertically */
+    height: 80vh;
+}
+/* The board is a CSS grid; JavaScript sets its number of columns when creating it. */
+.container {
+    display: grid;
+    gap: 5px; /* Space between boxes */
+    justify-content: center; /* Center the grid */
+    margin-top: 20px;
+}
+/* Indicate that board spaces can be clicked and make keyboard focus visible. */
+.container .box {
+    cursor: pointer;
+}
+/* Add a visible outline for keyboard users navigating board and hand buttons. */
+.container .box:focus-visible,
+.hand-tile:focus-visible {
+    outline: 3px solid #111;
+    outline-offset: 2px;
+}
+/* Mark the hand tile currently selected for placement. */
+.box.selected {
+    outline: 4px solid #d18b00;
+}
+/* Keep turn instructions centered and easy to notice. */
+#turnStatus {
+    text-align: center;
+    font-weight: bold;
+}
+/* Style the optional action that ends the game once a rule condition is met. */
+#endGameButton {
+    display: block;
+    margin: 10px auto;
+    padding: 9px 16px;
+    border: 2px solid #8a2525;
+    border-radius: 5px;
+    background: #b83a3a;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+}
+/* Present the final scores in a distinct panel. */
+#gameOverArea {
+    max-width: 700px;
+    margin: 20px auto;
+    padding: 16px;
+    border: 2px solid #555;
+    border-radius: 8px;
+    background: #f5f5f5;
+}
+/* Center the final-results heading. */
+#gameOverArea h2 {
+    text-align: center;
+}
+/* Give the browser's native company dropdown dialog a readable card layout. */
+dialog {
+    width: min(420px, calc(100% - 40px));
+    padding: 20px;
+    border: 2px solid #555;
+    border-radius: 8px;
+}
+/* Dim the page behind the open dropdown dialog. */
+dialog::backdrop {
+    background: rgb(0 0 0 / 45%);
+}
+/* Stack the dialog's label, dropdown, and buttons with consistent spacing. */
+dialog form {
+    display: grid;
+    gap: 14px;
+}
+/* Remove default heading space so the dialog content fits neatly. */
+dialog h2 {
+    margin: 0;
+}
+/* Make the dropdown large enough to use comfortably. */
+dialog select {
+    min-height: 40px;
+    padding: 6px;
+    font: inherit;
+}
+/* Group dialog buttons at the lower-right corner. */
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+/* Add padding to the dialog's Cancel and Choose buttons. */
+.dialog-actions button {
+    padding: 8px 12px;
+}
+/* Center and constrain the current player's hand area. */
+#handArea {
+    margin: 20px auto;
+    max-width: 660px;
+    text-align: center;
+}
+/* Allow hand tiles to wrap onto additional rows on narrow screens. */
+#playerHand {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+/* Put player and company summaries side-by-side when there is enough width. */
+#economyArea {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+    max-width: 900px;
+    margin: 20px auto;
+    padding: 0 12px;
+}
+/* Stack summary cards and stock-purchase options with even spacing. */
+#playerSummary,
+#companySummary,
+#stockPurchaseOptions {
+    display: grid;
+    gap: 8px;
+}
+/* Shared card appearance for player/company information and stock purchase rows. */
+.summary-card,
+.purchase-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid #888;
+    border-radius: 4px;
+    background: #fff;
+}
+/* A small color marker identifies a company without relying on its name alone. */
+.company-color-dot {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid #333;
+    border-radius: 50%;
+}
+/* Let descriptive text take available room between the marker and quantity field. */
+#companySummary .summary-card span:nth-child(2),
+.purchase-row span:not(.company-color-dot) {
+    flex: 1;
+}
+/* Give buying shares and resolving a merger clear bordered panels. */
+#stockPurchaseArea,
+#mergerResolutionArea {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 16px;
+    border: 2px solid #555;
+    border-radius: 8px;
+}
+/* Keep stock quantities compact. */
+.purchase-row input {
+    width: 70px;
+}
+/* Center the button that confirms a player's stock purchases and finishes their turn. */
+#finishTurnButton {
+    display: block;
+    margin: 14px auto 0;
+    padding: 8px 16px;
+}
+/* Lay out merger instructions and share inputs in readable rows. */
+#mergerResolutionArea label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 12px 0;
+}
+/* Keep merger share-entry fields a consistent width. */
+#mergerResolutionArea input {
+    width: 80px;
+}
+/* Base style for each tile button in a player's hand. */
+.hand-tile {
+    min-width: 58px;
+    min-height: 42px;
+    border: 2px solid #333;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+}
+/* A thick border indicates the selected tile without hiding its company preview color. */
+.hand-tile.selected {
+    border: 4px solid #111;
+}
+/* Gray tiles preview starting a new company from unincorporated board spaces. */
+.hand-tile.starts-company {
+    background-color: #999;
+    background-image: none;
+    color: #111;
+}
+/* Disabled hand tiles keep their preview colors visible during other turn phases. */
+.hand-tile:disabled {
+    opacity: 1;
+}
+/* On phones, shrink board cells and allow horizontal scrolling instead of squeezing them. */
+@media (max-width: 700px) {
+    .container {
+        gap: 2px;
+        justify-content: start;
+        overflow-x: auto;
+    }
+    .box {
+        width: 34px;
+        height: 34px;
+        font-size: 10px;
+    }
+}
+/* Default dimensions and centered text for each board cell. */
+.box {
+    width: 50px;
+    height: 50px;
+    background-color: white;
+    border: 2px solid black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+}
+/* Center the footer and give it subdued text styling. */
+footer {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 14px;
+    height: 60px;
+    color: #555;
+}

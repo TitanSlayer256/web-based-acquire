@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Basic page metadata controls text encoding and mobile viewport sizing. -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acquire Banking App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- The JavaScript updates this heading when the game starts. -->
+    <header>
+        <h1 id="title">Welcome to Acquire Banking App</h1>
+    </header>
+    <main>
+        <!-- Setup screen: choose the number of players before dealing the game. -->
+        <div id="startScreen">
+            <form id="playerForm">
+                <label for="playerSelect">Select number of players (2-6):</label>
+                <select id="playerSelect" name="playerSelect">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+                <button id="startGameButton" type="button">Start Game</button>
+            </form>
+        </div>
+        <!-- The game screen stays hidden until Start Game is pressed. -->
+        <div id="gameBoardScreen" style="display: none">
+            <!-- Live instructions tell the current player what action is expected. -->
+            <p id="turnStatus" aria-live="polite"></p>
+            <!-- Only appears when the game-end rule is met. -->
+            <button id="endGameButton" type="button" style="display: none">Declare game over</button>
+            <!-- Final score and payout details are filled in after confirmation. -->
+            <section id="gameOverArea" style="display: none" aria-label="Final game results">
+                <h2>Game over</h2>
+                <div id="gameOverResults"></div>
+            </section>
+            <!-- JavaScript creates the 12-by-9 board buttons inside this container. -->
+            <div id="grid-container" class="container"></div>
+            <!-- The current player's private tiles are shown here. -->
+            <section id="handArea" aria-label="Current player's tiles">
+                <h2>Your tiles</h2>
+                <div id="playerHand"></div>
+            </section>
+            <!-- Public information: players' cash/shares and active company sizes/prices. -->
+            <section id="economyArea" aria-label="Player and company information">
+                <div>
+                    <h2>Players</h2>
+                    <div id="playerSummary"></div>
+                </div>
+                <div>
+                    <h2>Active companies</h2>
+                    <div id="companySummary"></div>
+                </div>
+            </section>
+            <!-- This optional phase appears after a successful tile placement. -->
+            <section id="stockPurchaseArea" style="display: none" aria-label="Buy company shares">
+                <h2>Buy shares</h2>
+                <p>You may buy up to 3 shares total. You can split them between active companies.</p>
+                <div id="stockPurchaseOptions"></div>
+                <p id="stockPurchaseSummary" aria-live="polite"></p>
+                <button id="finishTurnButton" type="button">Finish turn</button>
+            </section>
+            <!-- During a merger, shareholders choose how to sell, trade, or keep shares. -->
+            <section id="mergerResolutionArea" style="display: none" aria-label="Resolve merger shares">
+                <h2 id="mergerTitle">Resolve merger</h2>
+                <p id="mergerBonusSummary"></p>
+                <p id="mergerPlayerPrompt"></p>
+                <label>Sell shares: <input id="mergerSellInput" type="number" min="0" step="1" value="0"></label>
+                <label>Trade two absorbed-company shares for one surviving-company share: <input id="mergerTradeInput" type="number" min="0" step="1" value="0"></label>
+                <p id="mergerHoldSummary">Any remaining shares will be kept.</p>
+                <button id="resolveMergerPlayerButton" type="button">Confirm and continue</button>
+            </section>
+        </div>
+    </main>
+    <!-- Native browser dialog with a dropdown, reused for founding and tied-merger choices. -->
+    <dialog id="companyChoiceDialog" aria-labelledby="companyChoiceTitle">
+        <form method="dialog">
+            <h2 id="companyChoiceTitle">Choose a company</h2>
+            <label for="companyChoiceSelect">Company:</label>
+            <select id="companyChoiceSelect" name="companyChoice"></select>
+            <div class="dialog-actions">
+                <button type="submit" value="cancel">Cancel</button>
+                <button type="submit" value="choose">Choose company</button>
+            </div>
+        </form>
+    </dialog>
+    <!-- Small footer separate from game controls. -->
+    <footer>
+        <p>&copy; 2025 Acquire Banking App. All rights reserved.</p>
+    </footer>
+    <!-- Load game logic after the page elements so JavaScript can find them by ID. -->
+    <script src="script.js"></script>
+</body>
+</html>
