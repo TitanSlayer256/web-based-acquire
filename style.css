@@ -270,7 +270,17 @@ body.network-host #newGameButton { display: block; }
 #networkRoomPanel p { margin: 4px 0; }
 #networkJoinLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
 #networkJoinLinks a { color: inherit; overflow-wrap: anywhere; }
-#networkPlayers { font-weight: bold; }
+#networkPlayers { margin-top: 8px; }
+.lobby-player-count { margin: 4px 0 8px; font-weight: bold; }
+.lobby-player-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.lobby-player-tile { display: flex; align-items: center; gap: 10px; min-width: 200px; padding: 9px 12px; border: 1px solid #888; border-radius: 7px; background: #fff; }
+.lobby-player-info { display: flex; flex: 1; flex-direction: column; gap: 3px; text-align: left; }
+.lobby-player-name { font-weight: bold; }
+.lobby-player-status { color: #555; font-size: 12px; }
+.lobby-kick-button { padding: 6px 10px; border: 1px solid #8a2929; border-radius: 5px; background: #fff0f0; color: #7a1717; cursor: pointer; }
+.lobby-kick-button:hover:not(:disabled) { background: #ffdada; }
+.lobby-kick-button:focus-visible { outline: 3px solid #111; outline-offset: 2px; }
+.lobby-kick-button:disabled { cursor: wait; opacity: .6; }
 body.phone-client { background: #f4f4f4; }
 body.phone-client header { padding: 12px; }
 body.phone-client header h1 { font-size: 1.4rem; }

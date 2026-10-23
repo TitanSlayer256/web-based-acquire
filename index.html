@@ -14,7 +14,8 @@
         <section id="networkRoomPanel" style="display: none" aria-label="Phone connections">
             <p id="networkRoomStatus">Starting the phone connection…</p>
             <div id="networkJoinLinks"></div>
-            <p id="networkPlayers"></p>
+            <div id="networkPlayers" aria-live="polite"></div>
+            <p id="networkActionStatus" role="status" aria-live="polite"></p>
         </section>
     </header>
     <main id="phoneScreen" style="display: none" aria-live="polite"></main>

@@ -26,9 +26,12 @@ let networkEnabled = false;
 let networkRoomCode = "";
 let networkHostToken = "";
 let remotePlayers = [];
+let lobbyRosterSignature = null;
+let lobbyPlayerTiles = new Map();
 let hostEventSource = null;
 let phoneEventSource = null;
 let phoneToken = "";
+let phoneDeviceId = "";
 let phoneState = null;
 let phoneSelectedTile = null;
 let phoneSelectedCompany = null;
@@ -37,6 +40,8 @@ let phoneMergerSelections = { sell: 0, tradeShares: 0 };
 let phoneBusy = false;
 let phoneError = "";
 let phoneFormContext = "";
+let phonePointerActive = false;
+let phoneRenderDeferred = false;
 let remoteCompanyChoice = null;
 let networkPublishTimer = null;
 let networkSnapshotRevision = 0;
@@ -110,7 +115,7 @@ function persistHostRoomSession(players = remotePlayers) {
         localStorage.setItem(HOST_ROOM_SESSION_KEY, JSON.stringify({
             roomCode: networkRoomCode,
             hostToken: networkHostToken,
-            players: players.map(player => ({ id: player.id, name: player.name }))
+            players: players.map(player => ({ id: player.id, name: player.name, clientId: player.clientId || null }))
         }));
     } catch (error) { console.error("Could not save the host room session.", error); }
 }
@@ -1116,11 +1121,86 @@ function updateHostRoomPanel(room) {
     if (players) {
         const count = Number(document.getElementById("playerSelect")?.value || 2);
         const online = remotePlayers.filter(player => player.connected).length;
-        players.textContent = `${online} of ${count} selected players connected${remotePlayers.length ? `: ${remotePlayers.map(player => `${player.name}${player.connected ? "" : " (offline)"}`).join(", ")}` : ""}`;
+        const lobby = !playerData.length && !gameOver;
+        players.hidden = !lobby;
+        if (lobby) {
+            const signature = remotePlayers.map(player => `${player.id}:${player.name}`).join("|");
+            if (signature !== lobbyRosterSignature) {
+                players.replaceChildren();
+                lobbyPlayerTiles = new Map();
+                const summary = document.createElement("p");
+                summary.className = "lobby-player-count";
+                players.appendChild(summary);
+                const grid = document.createElement("div");
+                grid.className = "lobby-player-grid";
+                for (const player of remotePlayers) {
+                    const tile = document.createElement("div");
+                    tile.className = "lobby-player-tile";
+                    const info = document.createElement("div");
+                    info.className = "lobby-player-info";
+                    const name = document.createElement("span");
+                    name.className = "lobby-player-name";
+                    name.textContent = player.name;
+                    const connection = document.createElement("span");
+                    connection.className = "lobby-player-status";
+                    connection.textContent = player.connected ? "Connected" : "Disconnected";
+                    info.append(name, connection);
+                    const kick = document.createElement("button");
+                    kick.type = "button";
+                    kick.className = "lobby-kick-button";
+                    kick.textContent = "Kick";
+                    kick.setAttribute("aria-label", `Remove ${player.name} from the lobby`);
+                    kick.onclick = () => {
+                        const currentPlayer = remotePlayers.find(item => item.id === player.id);
+                        if (currentPlayer) kickLobbyPlayer(currentPlayer, kick);
+                    };
+                    tile.append(info, kick);
+                    grid.appendChild(tile);
+                    lobbyPlayerTiles.set(player.id, { tile, name, connection });
+                }
+                players.appendChild(grid);
+                lobbyRosterSignature = signature;
+            }
+            const summary = players.querySelector(".lobby-player-count");
+            if (summary) summary.textContent = `${online} of ${count} selected players connected`;
+            for (const player of remotePlayers) {
+                const tile = lobbyPlayerTiles.get(player.id);
+                if (tile) {
+                    tile.name.textContent = player.name;
+                    tile.connection.textContent = player.connected ? "Connected" : "Disconnected";
+                }
+            }
+        } else {
+            players.replaceChildren();
+            lobbyPlayerTiles = new Map();
+            lobbyRosterSignature = null;
+        }
         const startButton = document.getElementById("startGameButton");
         if (startButton) startButton.disabled = remotePlayers.length !== count || online !== count;
     }
     publishNetworkSnapshot();
+}
+
+async function kickLobbyPlayer(player, button) {
+    if (playerData.length || gameOver || button.disabled) return;
+    const actionStatus = document.getElementById("networkActionStatus");
+    button.disabled = true;
+    button.textContent = "Removing…";
+    if (actionStatus) actionStatus.textContent = `Removing ${player.name} from the lobby…`;
+    try {
+        const result = await phoneRequest("/api/kick", {
+            room: networkRoomCode,
+            hostToken: networkHostToken,
+            playerId: player.id,
+            hostPhase: !playerData.length && !gameOver ? "lobby" : "playing"
+        });
+        updateHostRoomPanel({ players: result.players });
+        if (actionStatus) actionStatus.textContent = `${player.name} was removed. They can rejoin with a different name.`;
+    } catch (error) {
+        if (actionStatus) actionStatus.textContent = `Could not remove ${player.name}: ${error.message}`;
+        button.textContent = "Kick";
+        button.disabled = false;
+    }
 }
 
 async function startHostNetwork() {
@@ -1130,6 +1210,11 @@ async function startHostNetwork() {
     const startButton = document.getElementById("startGameButton");
     startButton.disabled = true;
     try {
+        const healthResponse = await fetch("/api/health");
+        const health = await healthResponse.json();
+        if (!healthResponse.ok || health.features?.lobbyKick !== 2) {
+            throw new Error("Restart the Node server to enable lobby player removal.");
+        }
         const savedRoom = readHostRoomSession();
         const savedGame = readSavedHostGame();
         const savedPlayers = savedRoom?.players?.length
@@ -1280,15 +1365,21 @@ function renderPhoneJoin(errorText = "") {
     const nameInput = document.createElement("input");
     nameInput.maxLength = 24;
     nameInput.autocomplete = "nickname";
+    nameInput.value = localStorage.getItem(`acquire.playerName.${(phoneJoinCode || networkRoomCode).toUpperCase()}`) || "";
     nameLabel.appendChild(nameInput);
     panel.append(codeLabel, nameLabel);
     const joinButton = phoneElement("button", "", "Join game");
     joinButton.addEventListener("click", async () => {
         joinButton.disabled = true;
         try {
-            const joined = await phoneRequest("/api/join", { room: codeInput.value.trim().toUpperCase(), name: nameInput.value.trim() });
+            const joined = await phoneRequest("/api/join", {
+                room: codeInput.value.trim().toUpperCase(),
+                name: nameInput.value.trim(),
+                clientId: phoneDeviceId
+            });
             phoneToken = joined.token;
             localStorage.setItem(`acquire.player.${joined.code}`, phoneToken);
+            localStorage.setItem(`acquire.playerName.${joined.code}`, nameInput.value.trim());
             connectPhone(joined.code);
         } catch (error) { renderPhoneJoin(error.message); }
     });
@@ -1298,6 +1389,13 @@ function renderPhoneJoin(errorText = "") {
 }
 
 function renderPhone() {
+    // State snapshots can arrive while a mouse is held down. Replacing the
+    // phone screen at that moment removes the pressed tile button and cancels
+    // the browser's eventual click event. Render the latest state after release.
+    if (phonePointerActive) {
+        phoneRenderDeferred = true;
+        return;
+    }
     const screen = document.getElementById("phoneScreen");
     const formContext = JSON.stringify([phoneState?.self?.id, phoneState?.pending]);
     if (formContext !== phoneFormContext) {
@@ -1328,10 +1426,9 @@ function renderPhone() {
     portfolio.appendChild(phoneElement("p", "", holdings.join(" · ") || "No shares yet"));
     screen.appendChild(portfolio);
     const handPanel = phoneElement("section", "phone-panel");
-    const hasMouse = window.matchMedia?.("(pointer: fine)").matches;
     const tileInstruction = !phoneState.canPlay
         ? "Tile selection becomes available on your turn."
-        : hasMouse ? "Click a tile to place it." : "Tap a tile, then tap Play to place it.";
+        : "Select a tile, then press Play to place it.";
     handPanel.append(phoneElement("h3", "", "Your tiles"), phoneElement("p", "", tileInstruction));
     const hand = phoneElement("div", "phone-hand");
     for (const tile of player.hand || []) {
@@ -1342,8 +1439,8 @@ function renderPhone() {
         button.setAttribute("aria-label", `${tile.name}. ${tile.title}`);
         button.disabled = !phoneState.canPlay || phoneBusy || tile.unplayable;
         button.addEventListener("click", () => {
-            if (hasMouse) sendPhoneAction({ type: "play", tile: tile.name });
-            else { phoneSelectedTile = tile.name; renderPhone(); }
+            phoneSelectedTile = tile.name;
+            renderPhone();
         });
         hand.appendChild(button);
     }
@@ -1491,6 +1588,14 @@ function connectPhone(code) {
     if (phoneEventSource) phoneEventSource.close();
     phoneEventSource = new EventSource(`/api/events?room=${encodeURIComponent(code)}&token=${encodeURIComponent(phoneToken)}`);
     phoneEventSource.addEventListener("state", event => { phoneState = JSON.parse(event.data); phoneError = ""; renderPhone(); });
+    phoneEventSource.addEventListener("kicked", event => {
+        phoneEventSource?.close();
+        localStorage.removeItem(`acquire.player.${code}`);
+        phoneToken = "";
+        phoneState = null;
+        phoneError = "";
+        renderPhoneJoin(JSON.parse(event.data).message);
+    });
     phoneEventSource.onerror = () => { const status = document.getElementById("phoneConnectionStatus"); if (status) status.textContent = "Connection lost — reconnecting…"; };
     phoneRequest(`/api/state?room=${encodeURIComponent(code)}&token=${encodeURIComponent(phoneToken)}`).then(state => { phoneState = state; renderPhone(); }).catch(error => { localStorage.removeItem(`acquire.player.${code}`); renderPhoneJoin(error.message); });
 }
@@ -1500,8 +1605,27 @@ async function startPhoneClient() {
     document.querySelector("header #networkRoomPanel").style.display = "none";
     for (const main of document.querySelectorAll("body > main:not(#phoneScreen)")) main.style.display = "none";
     document.querySelector("footer").style.display = "none";
-    document.querySelector("#phoneScreen").style.display = "block";
+    const phoneScreen = document.querySelector("#phoneScreen");
+    phoneScreen.style.display = "block";
+    phoneScreen.addEventListener("pointerdown", event => {
+        if (event.isPrimary) phonePointerActive = true;
+    });
+    const finishPhonePointer = () => {
+        if (!phonePointerActive) return;
+        phonePointerActive = false;
+        if (phoneRenderDeferred) {
+            phoneRenderDeferred = false;
+            requestAnimationFrame(() => renderPhone());
+        }
+    };
+    document.addEventListener("pointerup", finishPhonePointer);
+    document.addEventListener("pointercancel", finishPhonePointer);
     networkRoomCode = phoneJoinCode.toUpperCase();
+    phoneDeviceId = localStorage.getItem("acquire.device.id") || "";
+    if (!phoneDeviceId) {
+        phoneDeviceId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem("acquire.device.id", phoneDeviceId);
+    }
     phoneToken = localStorage.getItem(`acquire.player.${networkRoomCode}`) || "";
     if (phoneToken) connectPhone(networkRoomCode);
     else renderPhoneJoin();
@@ -1562,6 +1686,7 @@ function beginNewGame() {
     title.textContent = "Welcome to Acquire";
     persistHostRoomSession(remotePlayers);
     renderEconomy();
+    updateHostRoomPanel({ players: remotePlayers });
 }
 
 // Show share options when possible; skip this phase if there are no shares or none are affordable.
@@ -1709,6 +1834,7 @@ document.getElementById("startGameButton").onclick = function() {
     syncCompanySizes();
     recalculatePlayability();
     takeTurn();
+    updateHostRoomPanel({ players: remotePlayers });
 };
 // Connect the page's action buttons to the functions that handle their clicks.
 document.getElementById("finishTurnButton").onclick = finishTurn;

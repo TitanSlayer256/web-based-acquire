@@ -64,7 +64,7 @@ function emit(client, event, data) {
 }
 
 function roster(room) {
-  return room.players.map(player => ({ id: player.id, name: player.name, connected: player.connected }));
+  return room.players.map(player => ({ id: player.id, name: player.name, connected: player.connected, clientId: player.clientId || null }));
 }
 
 function playerView(room, player) {
@@ -187,7 +187,7 @@ function staticFile(req, res) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, port: PORT, addresses: networkAddresses() });
+    if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, port: PORT, addresses: networkAddresses(), features: { lobbyKick: 2 } });
 
     if (req.method === 'POST' && url.pathname === '/api/host-room') {
       const body = await readJson(req);
@@ -214,7 +214,9 @@ const server = http.createServer(async (req, res) => {
       const players = Array.isArray(body.players) ? body.players.slice(0, 6).map((item, index) => ({
         id: Number.isInteger(item.id) && item.id >= 0 && item.id < 6 ? item.id : index,
         name: String(item.name || `Player ${index + 1}`).trim().slice(0, 24) || `Player ${index + 1}`,
-        token: randomToken(), connected: false
+        token: randomToken(),
+        clientId: /^[A-Za-z0-9_-]{16,128}$/.test(item.clientId || '') ? item.clientId : null,
+        connected: false
       })) : [];
       const room = { code, hostToken, hostConnected: false, players, snapshot: null, snapshotRevision: 0, pendingActionId: null, actionIds: new Set() };
       rooms.set(code, room);
@@ -227,23 +229,62 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/join') {
       const body = await readJson(req), room = getRoom(body.room);
       const name = String(body.name || '').trim().slice(0, 24);
+      const clientId = /^[A-Za-z0-9_-]{16,128}$/.test(body.clientId || '') ? body.clientId : '';
       if (!name) throw new Error('Enter your name.');
       // A player who lost their saved browser token can reclaim their seat by
-      // name after a disconnect, including after the game has started.
-      const matchingPlayers = room.players.filter(player => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+      // device ID or name after a disconnect, including after the game has started.
+      const deviceMatches = clientId ? room.players.filter(player => player.clientId === clientId) : [];
+      const matchingPlayers = deviceMatches.length
+        ? deviceMatches
+        : room.players.filter(player => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
       if (matchingPlayers.length > 1) throw new Error('More than one player has that name. Reconnect from the original phone browser or ask the host to use unique player names.');
       if (matchingPlayers.length === 1) {
         const player = matchingPlayers[0];
+        const gameStarted = room.snapshot?.phase === 'playing' || room.snapshot?.phase === 'finished';
+        if (gameStarted && player.name.toLocaleLowerCase() !== name.toLocaleLowerCase()) {
+          throw new Error('This game is already in progress. Rejoin with the name already assigned to your seat.');
+        }
+        const oldToken = player.token;
+        for (const client of [...roomStreams(room)]) {
+          if (client.role === 'player' && client.token === oldToken) {
+            emit(client, 'replaced', { message: 'This player seat reconnected in another tab or session.' });
+            roomStreams(room).delete(client);
+            client.res.end();
+          }
+        }
+        player.name = name;
+        if (clientId) player.clientId = clientId;
         player.token = randomToken();
         publish(room);
         return json(res, 200, { code: room.code, id: player.id, token: player.token, reconnected: true });
       }
       if (room.snapshot?.phase === 'playing' || room.snapshot?.phase === 'finished') throw new Error('This game has already started.');
       if (room.players.length >= 6) throw new Error('This room already has six players.');
-      const player = { id: room.players.length, name, token: randomToken(), connected: false };
+      const player = { id: room.players.length, name, token: randomToken(), clientId: clientId || null, connected: false };
       room.players.push(player);
       publish(room);
       return json(res, 201, { code: room.code, id: player.id, token: player.token });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/kick') {
+      const body = await readJson(req), room = getRoom(body.room);
+      if (body.hostToken !== room.hostToken) throw new Error('Only the laptop host can remove a player.');
+      if (body.hostPhase !== 'lobby') {
+        return json(res, 409, { error: 'Players can only be removed before the game starts.' });
+      }
+      const index = room.players.findIndex(player => player.id === Number(body.playerId));
+      if (index < 0) return json(res, 404, { error: 'That player is no longer in the lobby.' });
+      const [removedPlayer] = room.players.splice(index, 1);
+      for (const client of [...roomStreams(room)]) {
+        if (client.role === 'player' && client.token === removedPlayer.token) {
+          emit(client, 'kicked', { message: 'The host removed your seat. Rejoin the lobby with your preferred name.' });
+          roomStreams(room).delete(client);
+          client.res.end();
+        }
+      }
+      room.players.forEach((player, playerIndex) => { player.id = playerIndex; });
+      publish(room);
+      return json(res, 200, { ok: true, players: roster(room) });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/state') {
