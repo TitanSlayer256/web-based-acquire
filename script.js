@@ -16,6 +16,9 @@ let selectedTileName = null; // Name of the hand tile currently selected for pla
 let pendingTurn = false; // True while a player must finish buying shares or resolving a merger.
 let mergerState = null; // Temporary information needed while resolving a merger.
 const title = document.getElementById("title"); // Cache the page heading so start/reset can change it.
+const HOST_GAME_SAVE_KEY = "acquire.host.game.v1";
+const HOST_ROOM_SESSION_KEY = "acquire.host.room.v1";
+let finalSettlement = [];
 // Network state is a thin transport around the existing laptop-side game logic.
 const phoneJoinCode = new URLSearchParams(window.location.search).get("join");
 const isPhoneClient = Boolean(phoneJoinCode);
@@ -52,6 +55,64 @@ const companyColors = {
 // Capitalize company names for people while keeping their lowercase IDs stable in game data.
 function companyDisplayName(name) {
     return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
+}
+
+function readSavedHostGame() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(HOST_GAME_SAVE_KEY) || "null");
+        return saved?.version === 1 && Array.isArray(saved.gameBoard) && Array.isArray(saved.playerData) ? saved : null;
+    } catch (error) {
+        console.error("Could not read the saved Acquire game.", error);
+        return null;
+    }
+}
+
+function readHostRoomSession() {
+    try { return JSON.parse(localStorage.getItem(HOST_ROOM_SESSION_KEY) || "null"); }
+    catch (error) { console.error("Could not read the saved host room.", error); return null; }
+}
+
+function persistHostGame() {
+    if (isPhoneClient || !networkEnabled || !playerData.length || (remoteCompanyChoice && !mergerState)) return;
+    try {
+        localStorage.setItem(HOST_GAME_SAVE_KEY, JSON.stringify({
+            version: 1,
+            savedAt: Date.now(),
+            playerCount,
+            gameBoard,
+            playerData,
+            companies,
+            currentPlayerIndex,
+            pendingTurn,
+            gameOver,
+            finalSettlement,
+            mergerState: mergerState ? {
+                ...mergerState,
+                playerOrder: undefined,
+                playerOrderIds: (mergerState.playerOrder || []).map(player => player.id)
+            } : null
+        }));
+    } catch (error) {
+        console.error("Could not save the Acquire game.", error);
+        const status = document.getElementById("networkRoomStatus");
+        if (status) status.textContent = "Game save unavailable in this browser. Avoid refreshing this page.";
+    }
+}
+
+function clearSavedHostGame() {
+    try { localStorage.removeItem(HOST_GAME_SAVE_KEY); }
+    catch (error) { console.error("Could not clear the saved Acquire game.", error); }
+}
+
+function persistHostRoomSession(players = remotePlayers) {
+    if (isPhoneClient || !networkRoomCode || !networkHostToken) return;
+    try {
+        localStorage.setItem(HOST_ROOM_SESSION_KEY, JSON.stringify({
+            roomCode: networkRoomCode,
+            hostToken: networkHostToken,
+            players: players.map(player => ({ id: player.id, name: player.name }))
+        }));
+    } catch (error) { console.error("Could not save the host room session.", error); }
 }
 
 // #region Board and price table setup
@@ -199,7 +260,7 @@ function startGame () {
     document.getElementById("gameBoardScreen").style.display = "block";
 }
 // Draw the clickable board grid and place one random starting tile for each player.
-function initiateGameBoard(rows, columns) {
+function initiateGameBoard(rows, columns, seedInitialTiles = true) {
     const container = document.getElementById("grid-container");
     container.style.gridTemplateColumns = `repeat(${columns}, 50px)`;
     container.innerHTML = "";
@@ -217,9 +278,11 @@ function initiateGameBoard(rows, columns) {
             container.appendChild(box);
         }
     }
-    for (let i = 0; i < playerCount; i++) {
-        const seedTile = unassignedTile();
-        if (seedTile) updateTileOwnership(seedTile, "board");
+    if (seedInitialTiles) {
+        for (let i = 0; i < playerCount; i++) {
+            const seedTile = unassignedTile();
+            if (seedTile) updateTileOwnership(seedTile, "board");
+        }
     }
 }
 // Pick a random tile still in the draw pool; discarded or placed tiles are excluded.
@@ -319,45 +382,11 @@ function updateEndGameButton() {
 }
 
 // Confirm the declaration, pay final bonuses, sell shares in active companies, and show the winner.
-function endGame() {
-    if (gameOver || !gameEndConditionMet()) return;
-    if (!confirm("Are you sure you want to end the game and calculate the final scores?")) return;
-
-    gameOver = true;
-    pendingTurn = false;
-    selectedTileName = null;
-    mergerState = null;
-    document.getElementById("stockPurchaseArea").style.display = "none";
-    document.getElementById("mergerResolutionArea").style.display = "none";
-    document.getElementById("endGameButton").style.display = "none";
-
-    // Final settlements are processed from the smallest active company to the largest.
-    const activeCompanies = companies.filter(company => company.size > 0).sort((a, b) => a.size - b.size);
-    const settlement = [];
-    // Pay majority/minority bonuses before cashing in company shares.
-    for (const company of activeCompanies) {
-        settlement.push(`${companyDisplayName(company.name)}: ${payMergerBonuses(company)}`);
-    }
-    // Exchange each player's shares in active companies for cash at the current share price.
-    for (const company of activeCompanies) {
-        for (const player of playerData) {
-            const shares = player.shares[company.name] || 0;
-            if (shares > 0) {
-                player.money += shares * company.price;
-                settlement.push(`${player.name} sold ${shares} ${companyDisplayName(company.name)} share${shares === 1 ? "" : "s"} for $${shares * company.price}.`);
-            }
-        }
-    }
-    // Remove all holdings from the final display; shares in companies already absorbed are worthless.
-    for (const player of playerData) {
-        for (const company of companies) player.shares[company.name] = 0;
-    }
-
-    // Find the top total. More than one player can share the win if totals are tied.
+function renderGameOverResults() {
     const highestScore = Math.max(...playerData.map(player => player.money));
     const winners = playerData.filter(player => player.money === highestScore);
     const results = document.getElementById("gameOverResults");
-    results.innerHTML = "";
+    results.replaceChildren();
     const winnerMessage = document.createElement("p");
     winnerMessage.textContent = winners.length > 1
         ? `The game is over. ${winners.map(player => player.name).join(" and ")} tie with $${highestScore}.`
@@ -368,12 +397,12 @@ function endGame() {
         score.textContent = `${player.name}: $${player.money}`;
         results.appendChild(score);
     }
-    if (settlement.length) {
+    if (finalSettlement.length) {
         const details = document.createElement("details");
         const summary = document.createElement("summary");
         summary.textContent = "Show final payouts";
         const payoutList = document.createElement("ul");
-        for (const entry of settlement) {
+        for (const entry of finalSettlement) {
             const item = document.createElement("li");
             item.textContent = entry;
             payoutList.appendChild(item);
@@ -381,11 +410,50 @@ function endGame() {
         details.append(summary, payoutList);
         results.appendChild(details);
     }
+}
+
+function endGame() {
+    if (gameOver || !gameEndConditionMet()) return;
+    if (!confirm("Are you sure you want to end the game and calculate the final scores?")) return;
+
+    gameOver = true;
+    finalSettlement = [];
+    pendingTurn = false;
+    selectedTileName = null;
+    mergerState = null;
+    document.getElementById("stockPurchaseArea").style.display = "none";
+    document.getElementById("mergerResolutionArea").style.display = "none";
+    document.getElementById("endGameButton").style.display = "none";
+
+    // Final settlements are processed from the smallest active company to the largest.
+    const activeCompanies = companies.filter(company => company.size > 0).sort((a, b) => a.size - b.size);
+    // Pay majority/minority bonuses before cashing in company shares.
+    for (const company of activeCompanies) {
+        finalSettlement.push(`${companyDisplayName(company.name)}: ${payMergerBonuses(company)}`);
+    }
+    // Exchange each player's shares in active companies for cash at the current share price.
+    for (const company of activeCompanies) {
+        for (const player of playerData) {
+            const shares = player.shares[company.name] || 0;
+            if (shares > 0) {
+                player.money += shares * company.price;
+                finalSettlement.push(`${player.name} sold ${shares} ${companyDisplayName(company.name)} share${shares === 1 ? "" : "s"} for $${shares * company.price}.`);
+            }
+        }
+    }
+    // Remove all holdings from the final display; shares in companies already absorbed are worthless.
+    for (const player of playerData) {
+        for (const company of companies) player.shares[company.name] = 0;
+    }
+
+    // Find the top total. More than one player can share the win if totals are tied.
+    renderGameOverResults();
     document.getElementById("gameOverArea").style.display = "block";
     document.getElementById("turnStatus").textContent = "Final scores have been calculated.";
     renderBoard();
     renderHand();
     renderEconomy();
+    persistHostGame();
 }
 
 // Prepare the screen for a new turn and quietly replace any tiles that became unplayable.
@@ -404,6 +472,7 @@ function takeTurn() {
     renderBoard();
     renderHand();
     renderEconomy();
+    persistHostGame();
 }
 // Select one of the current player's tiles before they click its matching board space.
 function onSelectTile(tileName) {
@@ -455,6 +524,7 @@ function chooseCompany(options, titleText) {
         return new Promise(resolve => {
             remoteCompanyChoice = { options: options.map(company => company.name), titleText, resolve };
             updateSkipTurnButton();
+            persistHostGame();
             publishNetworkSnapshot();
         });
     }
@@ -533,6 +603,7 @@ function payMergerBonuses(company) {
 // Save the tile group and involved companies, then begin resolving the merger one company at a time.
 function startMerger(component, companyNames) {
     mergerState = {
+        stage: "selecting-survivor",
         componentTileNames: component.map(tile => tile.name), // These spaces become part of the final surviving company.
         remainingCompanyNames: [...companyNames],
         mergerPlayerIndex: currentPlayerIndex, // Merger share decisions start with the player who caused it.
@@ -546,10 +617,12 @@ function startMerger(component, companyNames) {
     document.getElementById("stockPurchaseArea").style.display = "none";
     renderBoard();
     renderHand();
+    persistHostGame();
     startNextMerger();
 }
 // Select the survivor and largest loser for the next step of a multi-company merger.
 async function startNextMerger() {
+    mergerState.stage = "selecting-survivor";
     const active = mergerState.remainingCompanyNames
         .map(name => companies.find(company => company.name === name))
         .filter(company => company && company.size > 0);
@@ -580,16 +653,19 @@ async function startNextMerger() {
         majority: loser.majority,
         minority: loser.minority
     };
+    mergerState.stage = "resolving";
     // Visit players in turn order, starting with the player who played the merger tile.
     mergerState.playerOrder = playerData.map((player, offset) => playerData[(mergerState.mergerPlayerIndex + offset) % playerData.length]);
     mergerState.playerStep = 0;
     const bonusResult = payMergerBonuses(mergerState.loserSnapshot);
+    mergerState.bonusSummary = bonusResult;
     document.getElementById("mergerTitle").textContent = `${companyDisplayName(loser.name)} is absorbed by ${companyDisplayName(survivor.name)}`;
     document.getElementById("mergerBonusSummary").textContent = `${companyDisplayName(loser.name)} had ${loser.size} tiles. Its share price was $${loser.price}. Bonuses: majority $${loser.majority}, minority $${loser.minority}. ${bonusResult}`;
     document.getElementById("mergerResolutionArea").style.display = "block";
     document.getElementById("turnStatus").textContent = `Merger in progress: resolve ${companyDisplayName(loser.name)}'s shares before continuing.`;
     renderBoard();
     renderEconomy();
+    persistHostGame();
     await showNextMergerPlayer();
 }
 // Find the next player with shares in the losing company and prepare their sell/trade controls.
@@ -656,10 +732,12 @@ async function resolveMergerPlayer() {
     survivor.sharesLeft -= traded;
     mergerState.playerStep += 1;
     renderEconomy();
+    persistHostGame();
     await showNextMergerPlayer();
 }
 // Move the losing company's board tiles to the survivor, then process any remaining losing companies.
 async function completeCurrentMerger() {
+    mergerState.stage = "next-company";
     const loserName = mergerState.loserSnapshot.name;
     const survivorName = mergerState.survivorName;
     for (const tile of gameBoard) {
@@ -669,6 +747,7 @@ async function completeCurrentMerger() {
     syncCompanySizes();
     renderBoard();
     renderEconomy();
+    persistHostGame();
     document.getElementById("mergerResolutionArea").style.display = "none";
     await startNextMerger();
 }
@@ -765,6 +844,7 @@ async function placeTile(tileName) {
     renderHand();
     renderEconomy();
     if (placementSucceeded) showStockPurchase();
+    else persistHostGame();
 }
 // Return the up/down/left/right neighbors of a named board space (diagonals do not connect).
 function getAdjacentTiles(tile) {
@@ -918,8 +998,9 @@ function renderEconomy() {
 // Keep the host override available only when advancing cannot interrupt a rule decision.
 function updateSkipTurnButton() {
     const button = document.getElementById("skipTurnButton");
-    if (!button) return;
-    button.disabled = !networkEnabled || !playerData.length || gameOver || Boolean(mergerState || remoteCompanyChoice);
+    if (button) button.disabled = !networkEnabled || !playerData.length || gameOver || Boolean(mergerState || remoteCompanyChoice);
+    const newGameButton = document.getElementById("newGameButton");
+    if (newGameButton) newGameButton.disabled = Boolean(mergerState || remoteCompanyChoice);
 }
 
 // Publish a read-only mirror of the existing game state for connected phones.
@@ -1028,6 +1109,7 @@ async function handleRemoteAction(action) {
 
 function updateHostRoomPanel(room) {
     remotePlayers = room.players || [];
+    persistHostRoomSession(remotePlayers);
     const status = document.getElementById("networkRoomStatus");
     const players = document.getElementById("networkPlayers");
     if (status) status.textContent = `Phone room ${networkRoomCode} — share a link with players on this Wi-Fi.`;
@@ -1048,14 +1130,33 @@ async function startHostNetwork() {
     const startButton = document.getElementById("startGameButton");
     startButton.disabled = true;
     try {
-        const response = await fetch("/api/host-room", { method: "POST" });
+        const savedRoom = readHostRoomSession();
+        const savedGame = readSavedHostGame();
+        const savedPlayers = savedRoom?.players?.length
+            ? savedRoom.players
+            : (savedGame?.playerData || []).map(player => ({ id: player.id, name: player.name }));
+        const response = await fetch("/api/host-room", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...(savedRoom || {}), players: savedPlayers })
+        });
         const room = await response.json();
         if (!response.ok) throw new Error(room.error || "Could not start the phone room.");
+        if (savedRoom?.roomCode && room.code !== savedRoom.roomCode) {
+            throw new Error(`The saved room ${savedRoom.roomCode} could not be resumed. The server offered ${room.code}, so the saved room was kept unchanged. Restart the Node server and refresh this page to retry.`);
+        }
         networkRoomCode = room.code;
         networkHostToken = room.hostToken;
+        networkSnapshotRevision = Number(room.snapshotRevision) || 0;
+        remotePlayers = room.players || [];
         networkEnabled = true;
+        persistHostRoomSession(remotePlayers.length ? remotePlayers : savedRoom?.players || []);
+        if (savedGame && !restoreSavedHostGame(savedGame)) {
+            document.getElementById("networkRoomStatus").textContent = "A saved game was found but could not be restored. It remains saved; use New Game only if you want to discard it.";
+        }
         const status = document.getElementById("networkRoomStatus");
-        status.textContent = `Players: connect to this Wi-Fi and open one of these links. Room code: ${room.code}`;
+        const restoreWarning = savedGame && !playerData.length;
+        if (!restoreWarning) status.textContent = `Players: connect to this Wi-Fi and open one of these links. Room code: ${room.code}`;
         const links = document.getElementById("networkJoinLinks");
         links.replaceChildren();
         for (const address of room.addresses) {
@@ -1080,7 +1181,6 @@ async function startHostNetwork() {
         hostEventSource = new EventSource(`/api/events?room=${encodeURIComponent(networkRoomCode)}&host=${encodeURIComponent(networkHostToken)}`);
         hostEventSource.addEventListener("roster", event => {
             updateHostRoomPanel(JSON.parse(event.data));
-            startButton.disabled = false;
         });
         hostEventSource.addEventListener("action", event => {
             const action = JSON.parse(event.data);
@@ -1089,6 +1189,65 @@ async function startHostNetwork() {
     } catch (error) {
         document.getElementById("networkRoomStatus").textContent = `Phone connection unavailable: ${error.message}`;
     }
+}
+
+function restoreSavedHostGame(saved) {
+    if (!saved || saved.gameBoard.length !== gameBoard.length || !saved.playerData.length || !Array.isArray(saved.companies)) return false;
+    const restoredPlayerCount = Number(saved.playerCount) || saved.playerData.length;
+    if (restoredPlayerCount < 2 || restoredPlayerCount > 6 || saved.currentPlayerIndex < 0 || saved.currentPlayerIndex >= saved.playerData.length) return false;
+    const savedCompanies = new Map(saved.companies.map(company => [company.name, company]));
+    if (companies.some(company => !savedCompanies.has(company.name))) return false;
+
+    playerCount = restoredPlayerCount;
+    document.getElementById("playerSelect").value = String(playerCount);
+    gameBoard = saved.gameBoard.map(tile => ({ ...tile }));
+    playerData = saved.playerData.map(player => ({ ...player, playerTiles: [...player.playerTiles], shares: { ...player.shares } }));
+    companies.forEach(company => Object.assign(company, savedCompanies.get(company.name)));
+    currentPlayerIndex = Number(saved.currentPlayerIndex);
+    pendingTurn = Boolean(saved.pendingTurn);
+    gameOver = Boolean(saved.gameOver);
+    finalSettlement = Array.isArray(saved.finalSettlement) ? [...saved.finalSettlement] : [];
+    selectedTileName = null;
+    const savedMerger = saved.mergerState;
+    mergerState = savedMerger ? {
+        ...savedMerger,
+        playerOrder: (savedMerger.playerOrderIds || []).map(id => playerData.find(player => player.id === id)).filter(Boolean)
+    } : null;
+    remoteCompanyChoice = null;
+
+    document.getElementById("startScreen").style.display = "none";
+    document.getElementById("gameBoardScreen").style.display = "block";
+    document.getElementById("gameOverArea").style.display = gameOver ? "block" : "none";
+    document.getElementById("mergerResolutionArea").style.display = "none";
+    document.getElementById("stockPurchaseArea").style.display = "none";
+    title.textContent = "Game Board";
+    initiateGameBoard(gameBoardHeight, gameBoardWidth, false);
+    recalculatePlayability();
+    renderBoard();
+    renderHand();
+    renderEconomy();
+
+    if (gameOver) {
+        document.getElementById("turnStatus").textContent = "Final scores have been restored.";
+        renderGameOverResults();
+    } else if (mergerState) {
+        if (mergerState.stage === "resolving" && mergerState.loserSnapshot) {
+            document.getElementById("mergerTitle").textContent = `${companyDisplayName(mergerState.loserSnapshot.name)} is absorbed by ${companyDisplayName(mergerState.survivorName)}`;
+            document.getElementById("mergerBonusSummary").textContent = `${companyDisplayName(mergerState.loserSnapshot.name)} had ${mergerState.loserSnapshot.size} tiles. Its share price was $${mergerState.loserSnapshot.price}. Bonuses: majority $${mergerState.loserSnapshot.majority}, minority $${mergerState.loserSnapshot.minority}. ${mergerState.bonusSummary || ""}`;
+            document.getElementById("mergerResolutionArea").style.display = "block";
+            document.getElementById("turnStatus").textContent = `Merger in progress: resolve ${companyDisplayName(mergerState.loserSnapshot.name)}'s shares before continuing.`;
+            showNextMergerPlayer();
+        } else {
+            document.getElementById("turnStatus").textContent = "Resuming the pending merger choice.";
+            startNextMerger();
+        }
+    } else if (pendingTurn) {
+        document.getElementById("turnStatus").textContent = `${currentPlayer().name}'s saved share purchase — finish the turn when ready.`;
+        showStockPurchase();
+    } else {
+        document.getElementById("turnStatus").textContent = `${currentPlayer().name}'s turn has been restored.`;
+    }
+    return true;
 }
 
 function phoneElement(tag, className, text) {
@@ -1378,6 +1537,33 @@ function skipCurrentTurn() {
     updateSkipTurnButton();
 }
 
+function beginNewGame() {
+    if (mergerState || remoteCompanyChoice) return;
+    if (playerData.length && !confirm("Start a new game? The saved game in progress will be replaced.")) return;
+
+    clearSavedHostGame();
+    playerCount = Number(document.getElementById("playerSelect").value) || playerCount || 2;
+    gameBoard = gameBoard.map(tile => ({ ...tile, ownership: "unassigned", holderId: null, playability: "playable" }));
+    playerData = [];
+    companies.forEach(company => { company.size = 0; company.price = 0; company.majority = 0; company.minority = 0; company.sharesLeft = 25; });
+    currentPlayerIndex = 0;
+    selectedTileName = null;
+    pendingTurn = false;
+    mergerState = null;
+    remoteCompanyChoice = null;
+    gameOver = false;
+    finalSettlement = [];
+
+    document.getElementById("gameOverArea").style.display = "none";
+    document.getElementById("stockPurchaseArea").style.display = "none";
+    document.getElementById("mergerResolutionArea").style.display = "none";
+    document.getElementById("startScreen").style.display = "block";
+    document.getElementById("gameBoardScreen").style.display = "none";
+    title.textContent = "Welcome to Acquire";
+    persistHostRoomSession(remotePlayers);
+    renderEconomy();
+}
+
 // Show share options when possible; skip this phase if there are no shares or none are affordable.
 function showStockPurchase() {
     const player = currentPlayer();
@@ -1389,6 +1575,7 @@ function showStockPurchase() {
     }
 
     pendingTurn = true;
+    persistHostGame();
     const area = document.getElementById("stockPurchaseArea");
     const options = document.getElementById("stockPurchaseOptions");
     options.innerHTML = "";
@@ -1419,6 +1606,7 @@ function showStockPurchase() {
     area.style.display = "block";
     updatePurchaseSummary();
     renderHand();
+    persistHostGame();
     publishNetworkSnapshot();
 }
 
@@ -1527,6 +1715,7 @@ document.getElementById("finishTurnButton").onclick = finishTurn;
 document.getElementById("resolveMergerPlayerButton").onclick = resolveMergerPlayer;
 document.getElementById("endGameButton").onclick = endGame;
 document.getElementById("skipTurnButton").onclick = skipCurrentTurn;
+document.getElementById("newGameButton").onclick = beginNewGame;
 
 if (isPhoneClient) startPhoneClient();
 else startNetworkHost();

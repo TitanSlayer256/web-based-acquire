@@ -257,6 +257,8 @@ body.network-host #handArea { display: none; }
 body.network-host #stockPurchaseArea { display: none !important; }
 #skipTurnButton { display: none; margin: 8px auto; padding: 9px 14px; }
 body.network-host #skipTurnButton { display: block; }
+#newGameButton { display: none; margin: 8px auto; padding: 9px 14px; }
+body.network-host #newGameButton { display: block; }
 #networkRoomPanel {
     max-width: 900px;
     margin: 10px auto 0;

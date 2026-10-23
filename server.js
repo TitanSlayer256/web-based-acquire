@@ -190,10 +190,38 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, port: PORT, addresses: networkAddresses() });
 
     if (req.method === 'POST' && url.pathname === '/api/host-room') {
-      const code = makeRoomCode();
-      const room = { code, hostToken: randomToken(), hostConnected: false, players: [], snapshot: null, snapshotRevision: 0, pendingActionId: null, actionIds: new Set() };
+      const body = await readJson(req);
+      let existingRoom = [...rooms.values()].find(item => body.hostToken && item.hostToken === body.hostToken);
+      // If browser storage is unavailable on this origin, reuse the only room
+      // already hosted by this server instead of silently creating a new code.
+      if (!existingRoom && !body.hostToken && rooms.size === 1) {
+        existingRoom = rooms.values().next().value;
+      }
+      if (existingRoom) {
+        return json(res, 200, {
+          code: existingRoom.code, hostToken: existingRoom.hostToken, port: PORT,
+          addresses: networkAddresses(), players: roster(existingRoom),
+          snapshotRevision: existingRoom.snapshotRevision, resumed: true
+        });
+      }
+
+      const requestedCode = /^[A-F0-9]{6}$/i.test(body.roomCode || "") ? String(body.roomCode).toUpperCase() : "";
+      if (requestedCode && rooms.has(requestedCode)) {
+        return json(res, 409, { error: `Room ${requestedCode} is already active, but this host session could not be verified. The existing game was left untouched.` });
+      }
+      const code = requestedCode || makeRoomCode();
+      const hostToken = /^[A-Za-z0-9_-]{20,128}$/.test(body.hostToken || "") ? body.hostToken : randomToken();
+      const players = Array.isArray(body.players) ? body.players.slice(0, 6).map((item, index) => ({
+        id: Number.isInteger(item.id) && item.id >= 0 && item.id < 6 ? item.id : index,
+        name: String(item.name || `Player ${index + 1}`).trim().slice(0, 24) || `Player ${index + 1}`,
+        token: randomToken(), connected: false
+      })) : [];
+      const room = { code, hostToken, hostConnected: false, players, snapshot: null, snapshotRevision: 0, pendingActionId: null, actionIds: new Set() };
       rooms.set(code, room);
-      return json(res, 201, { code, hostToken: room.hostToken, port: PORT, addresses: networkAddresses() });
+      return json(res, 201, {
+        code, hostToken: room.hostToken, port: PORT,
+        addresses: networkAddresses(), players: roster(room), snapshotRevision: 0, resumed: false
+      });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/join') {
