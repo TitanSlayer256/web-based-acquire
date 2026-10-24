@@ -1194,7 +1194,6 @@ function updateHostRoomPanel(room) {
         const startButton = document.getElementById("startGameButton");
         if (startButton) startButton.disabled = remotePlayers.length !== count || online !== count;
     }
-    publishNetworkSnapshot();
 }
 
 async function kickLobbyPlayer(player, button) {
