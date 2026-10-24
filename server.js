@@ -73,7 +73,8 @@ function playerView(room, player) {
   if (!snapshot) {
     return {
       phase: 'lobby', room: room.code, hostConnected: room.hostConnected,
-      players: connected, self: { id: player.id, name: player.name }, pending: null
+      players: connected, self: { id: player.id, name: player.name }, pending: null,
+      snapshotRevision: room.snapshotRevision
     };
   }
   const self = snapshot.players.find(item => item.id === player.id) || (snapshot.phase === 'lobby' ? { id: player.id, name: player.name } : null);
@@ -89,6 +90,7 @@ function playerView(room, player) {
     currentPlayerId: snapshot.currentPlayerId,
     pending,
     winners: snapshot.winners,
+    snapshotRevision: room.snapshotRevision,
     canPlay: snapshot.phase === 'playing' && snapshot.currentPlayerId === player.id && !pending,
   };
 }

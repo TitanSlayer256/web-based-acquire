@@ -38,6 +38,7 @@ let phoneSelectedCompany = null;
 let phoneStockSelections = {};
 let phoneMergerSelections = { sell: 0, tradeShares: 0 };
 let phoneBusy = false;
+let phoneActionWaiter = null;
 let phoneError = "";
 let phoneFormContext = "";
 let phonePointerActive = false;
@@ -1602,28 +1603,45 @@ function renderPhone() {
         panel.appendChild(confirm); screen.appendChild(panel);
     }
     if (phoneState.phase === "lobby") screen.appendChild(phoneElement("section", "phone-panel", "You are connected. Waiting for the host to start the game."));
-    const connected = phoneElement("p", "", "Connected to the laptop host"); connected.id = "phoneConnectionStatus"; screen.appendChild(connected);
+    const connected = phoneElement("p", "", phoneBusy ? "Waiting for the laptop to apply your action…" : "Connected to the laptop host"); connected.id = "phoneConnectionStatus"; screen.appendChild(connected);
     if (phoneError) screen.appendChild(phoneElement("p", "phone-error", phoneError));
 }
 
 async function sendPhoneAction(action) {
     if (phoneBusy) return;
+    const startingRevision = Number(phoneState?.snapshotRevision) || 0;
+    let resolveApplied;
+    const actionApplied = new Promise(resolve => { resolveApplied = resolve; });
+    const waiter = { afterRevision: startingRevision, resolve: resolveApplied };
+    phoneActionWaiter = waiter;
     phoneBusy = true; renderPhone();
     try {
         const actionId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         await phoneRequest("/api/action", { room: networkRoomCode, token: phoneToken, actionId, ...action });
+        if ((Number(phoneState?.snapshotRevision) || 0) <= startingRevision) await actionApplied;
         phoneError = "";
         phoneSelectedTile = null;
     } catch (error) {
         phoneError = error.message;
-    } finally { phoneBusy = false; renderPhone(); }
+    } finally {
+        if (phoneActionWaiter === waiter) phoneActionWaiter = null;
+        phoneBusy = false;
+        renderPhone();
+    }
 }
 
 function connectPhone(code) {
     networkRoomCode = code;
     if (phoneEventSource) phoneEventSource.close();
     phoneEventSource = new EventSource(`/api/events?room=${encodeURIComponent(code)}&token=${encodeURIComponent(phoneToken)}`);
-    phoneEventSource.addEventListener("state", event => { phoneState = JSON.parse(event.data); phoneError = ""; renderPhone(); });
+    phoneEventSource.addEventListener("state", event => {
+        phoneState = JSON.parse(event.data);
+        phoneError = "";
+        if (phoneActionWaiter && Number(phoneState.snapshotRevision) > phoneActionWaiter.afterRevision) {
+            phoneActionWaiter.resolve();
+        }
+        renderPhone();
+    });
     phoneEventSource.addEventListener("kicked", event => {
         phoneEventSource?.close();
         localStorage.removeItem(`acquire.player.${code}`);
