@@ -49,18 +49,6 @@ main {
     text-align: center;
     font-weight: bold;
 }
-/* Style the optional action that ends the game once a rule condition is met. */
-#endGameButton {
-    display: block;
-    margin: 10px auto;
-    padding: 9px 16px;
-    border: 2px solid #8a2525;
-    border-radius: 5px;
-    background: #b83a3a;
-    color: white;
-    font-weight: bold;
-    cursor: pointer;
-}
 /* Present the final scores in a distinct panel. */
 #gameOverArea {
     max-width: 700px;
@@ -609,6 +597,15 @@ body.phone-client .phone-panel button:hover:not(:disabled) {
     border-color: #e0b85f;
     background: linear-gradient(145deg, #506e90, #405d7d);
 }
+body.phone-client .phone-panel button.phone-declare-game-over {
+    border-color: #a52d35;
+    background: linear-gradient(145deg, #c9444c, #a92f39);
+    color: #fff;
+}
+body.phone-client .phone-panel button.phone-declare-game-over:hover:not(:disabled) {
+    border-color: #7f2028;
+    background: linear-gradient(145deg, #d85159, #ba343e);
+}
 body.phone-client .phone-panel button:disabled {
     border-color: #cbd5e1;
     background: #e4eaf1;
@@ -1047,5 +1044,221 @@ body.network-host.network-game-active #toggleStocksButton:hover {
     }
     body.network-host.network-game-active #playerSummary {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* A more celebratory, easy-to-scan final results screen. */
+body.network-host.network-game-active #gameOverArea {
+    max-width: 820px;
+    padding: clamp(18px, 3vw, 30px);
+    border: 1px solid #8294a9;
+    border-top: 5px solid #d5ad59;
+    background: linear-gradient(155deg, #f8fafc, #e8eef5);
+    box-shadow: 0 18px 44px rgb(20 35 55 / 24%);
+}
+body.network-host.network-game-active #gameOverArea > h2 {
+    margin: 0 0 18px;
+    color: #20354d;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: 0.02em;
+    text-align: center;
+}
+body.network-host.network-game-active #gameOverResults {
+    display: grid;
+    gap: 16px;
+    max-width: 660px;
+    margin: 0 auto;
+}
+body.network-host.network-game-active .game-over-winner-card {
+    display: flex;
+    min-height: 190px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 22px;
+    border: 1px solid #bd954a;
+    border-radius: 16px;
+    background: radial-gradient(ellipse at 50% 0%, #fff3cf 0%, #f0d58e 42%, #d1ad61 100%);
+    color: #27364a;
+    text-align: center;
+    box-shadow: inset 0 1px rgb(255 255 255 / 72%), 0 8px 20px rgb(88 67 25 / 16%);
+}
+body.network-host.network-game-active .game-over-winner-kicker {
+    color: #71531d;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.17em;
+    text-transform: uppercase;
+}
+body.network-host.network-game-active .game-over-winner-names {
+    margin: 3px 0;
+    color: #1d3048;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(27px, 4.5vw, 42px);
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+}
+body.network-host.network-game-active .game-over-winner-total {
+    color: #172a40;
+    font-size: clamp(27px, 4vw, 36px);
+    font-variant-numeric: tabular-nums;
+}
+body.network-host.network-game-active .game-over-winner-caption {
+    color: #665735;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+body.network-host.network-game-active .game-over-standings h3 {
+    margin: 0 0 8px;
+    color: #263d57;
+    font-size: 18px;
+}
+body.network-host.network-game-active .game-over-standings-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+body.network-host.network-game-active .game-over-standing {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid #d2dbe5;
+    border-radius: 9px;
+    background: #fff;
+    color: #26384d;
+}
+body.network-host.network-game-active .game-over-standing.is-winner {
+    border-color: #d2b46d;
+    background: #fff9e9;
+}
+body.network-host.network-game-active .game-over-place {
+    color: #6a7a8e;
+    font-size: 13px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+body.network-host.network-game-active .game-over-standing.is-winner .game-over-place {
+    color: #85631f;
+}
+body.network-host.network-game-active .game-over-player-name {
+    min-width: 0;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+body.network-host.network-game-active .game-over-player-total {
+    color: #1c324b;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+body.network-host.network-game-active .game-over-payout-details {
+    overflow: hidden;
+    border: 1px solid #bdc9d8;
+    border-radius: 11px;
+    background: linear-gradient(145deg, #f3f6fa, #e8eef5);
+    color: #33465d;
+    box-shadow: inset 0 1px rgb(255 255 255 / 75%);
+}
+body.network-host.network-game-active .game-over-payout-details[open] {
+    border-color: #c7a65d;
+    background: linear-gradient(145deg, #f8f5eb, #edf1f5);
+}
+body.network-host.network-game-active .game-over-payout-details summary {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 14px;
+    color: #314761;
+    font-weight: 800;
+    list-style: none;
+    cursor: pointer;
+}
+body.network-host.network-game-active .game-over-payout-details summary::after {
+    margin-left: auto;
+    color: #9a742f;
+    content: "+";
+    font-size: 22px;
+    line-height: 1;
+}
+body.network-host.network-game-active .game-over-payout-details[open] summary::after {
+    content: "−";
+}
+body.network-host.network-game-active .game-over-payout-details summary:hover {
+    background: rgb(255 255 255 / 55%);
+}
+body.network-host.network-game-active .game-over-payout-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 4px 12px 13px;
+    list-style: none;
+    color: #526276;
+    font-size: 14px;
+}
+body.network-host.network-game-active .game-over-payout-list li {
+    position: relative;
+    padding: 11px 13px 11px 40px;
+    border: 1px solid #d8e0e9;
+    border-left: 3px solid #c4a052;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 92%);
+    line-height: 1.45;
+    box-shadow: 0 2px 5px rgb(35 52 73 / 5%);
+}
+body.network-host.network-game-active .game-over-payout-list li::before {
+    position: absolute;
+    top: 50%;
+    left: 14px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid #d1b36a;
+    border-radius: 50%;
+    background: #fff7df;
+    color: #8a6726;
+    content: "✓";
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 14px;
+    text-align: center;
+    transform: translateY(-50%);
+}
+body.network-host.network-game-active .game-over-new-game-button {
+    justify-self: center;
+    min-height: 46px;
+    margin-top: 2px;
+    padding: 10px 24px;
+    border: 1px solid #a88237;
+    border-radius: 9px;
+    background: linear-gradient(145deg, #405d7d, #293f5a);
+    color: #fff8e8;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgb(30 41 59 / 16%);
+}
+body.network-host.network-game-active .game-over-new-game-button:hover {
+    border-color: #d7b45f;
+    background: linear-gradient(145deg, #506e90, #344f6d);
+    transform: translateY(-1px);
+}
+body.network-host.network-game-active .game-over-new-game-button:focus-visible {
+    outline: 3px solid #d2a647;
+    outline-offset: 3px;
+}
+@media (max-width: 520px) {
+    body.network-host.network-game-active .game-over-standing {
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        gap: 7px;
+        padding: 8px;
     }
 }

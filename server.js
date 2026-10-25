@@ -169,6 +169,12 @@ function validateAction(room, player, action) {
     if (!Number.isInteger(sell) || !Number.isInteger(trade) || sell < 0 || trade < 0 || sell + trade * 2 > pending.shares || trade > pending.maxTrades) throw new Error('Those merger choices exceed your available shares.');
     return;
   }
+  if (action.type === 'endTurn') {
+    if (pending?.type !== 'endTurn' || pending.playerId !== player.id) throw new Error('It is not your end-of-turn decision.');
+    if (action.choice !== 'continue' && action.choice !== 'declare') throw new Error('Choose whether to draw a tile or declare game over.');
+    if (action.choice === 'declare' && !pending.canDeclareGameOver) throw new Error('The game-ending condition is no longer met.');
+    return;
+  }
   throw new Error('Unknown game action.');
 }
 

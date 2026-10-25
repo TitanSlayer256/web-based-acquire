@@ -14,6 +14,7 @@ let gameOver = false; // Prevents further play once final scoring has happened.
 let currentPlayerIndex = 0; // Index into playerData for the player whose turn it is.
 let selectedTileName = null; // Name of the hand tile currently selected for placement.
 let pendingTurn = false; // True while a player must finish buying shares or resolving a merger.
+let awaitingEndTurnChoice = false; // The current player completed the turn and must choose whether to draw or declare.
 let mergerState = null; // Temporary information needed while resolving a merger.
 const title = document.getElementById("title"); // Cache the page heading so start/reset can change it.
 const HOST_GAME_SAVE_KEY = "acquire.host.game.v1";
@@ -40,6 +41,7 @@ let phoneMergerSelections = { sell: 0, tradeShares: 0 };
 let phoneBusy = false;
 let phoneActionWaiter = null;
 let phoneError = "";
+let phoneGameOverConfirmation = false;
 let phoneFormContext = "";
 let phonePointerActive = false;
 let phoneRenderDeferred = false;
@@ -91,6 +93,7 @@ function persistHostGame() {
             companies,
             currentPlayerIndex,
             pendingTurn,
+            awaitingEndTurnChoice,
             gameOver,
             finalSettlement,
             mergerState: mergerState ? {
@@ -382,33 +385,63 @@ function gameEndConditionMet() {
         (activeCompanies.length > 0 && activeCompanies.every(company => company.size >= 11));
 }
 
-// Show the declaration button only when a condition is met and no merger is being resolved.
-function updateEndGameButton() {
-    const button = document.getElementById("endGameButton");
-    if (button) button.style.display = !gameOver && !mergerState && gameEndConditionMet() ? "block" : "none";
-}
-
 // Confirm the declaration, pay final bonuses, sell shares in active companies, and show the winner.
 function renderGameOverResults() {
-    const highestScore = Math.max(...playerData.map(player => player.money));
-    const winners = playerData.filter(player => player.money === highestScore);
+    const standings = [...playerData].sort((a, b) => b.money - a.money);
+    const highestScore = standings[0]?.money ?? 0;
+    const winners = standings.filter(player => player.money === highestScore);
     const results = document.getElementById("gameOverResults");
     results.replaceChildren();
-    const winnerMessage = document.createElement("p");
-    winnerMessage.textContent = winners.length > 1
-        ? `The game is over. ${winners.map(player => player.name).join(" and ")} tie with $${highestScore}.`
-        : `The game is over. ${winners[0].name} wins with $${highestScore}.`;
-    results.appendChild(winnerMessage);
-    for (const player of playerData) {
-        const score = document.createElement("p");
-        score.textContent = `${player.name}: $${player.money}`;
-        results.appendChild(score);
-    }
+    const winnerCard = document.createElement("section");
+    winnerCard.className = "game-over-winner-card";
+    const winnerKicker = document.createElement("span");
+    winnerKicker.className = "game-over-winner-kicker";
+    winnerKicker.textContent = winners.length > 1 ? "Shared victory" : "Acquire champion";
+    const winnerNames = document.createElement("h3");
+    winnerNames.className = "game-over-winner-names";
+    winnerNames.textContent = winners.map(player => player.name).join(" & ");
+    const winnerTotal = document.createElement("strong");
+    winnerTotal.className = "game-over-winner-total";
+    winnerTotal.textContent = `$${highestScore.toLocaleString()}`;
+    const winnerCaption = document.createElement("span");
+    winnerCaption.className = "game-over-winner-caption";
+    winnerCaption.textContent = "final cash";
+    winnerCard.append(winnerKicker, winnerNames, winnerTotal, winnerCaption);
+    results.appendChild(winnerCard);
+    const standingsSection = document.createElement("section");
+    standingsSection.className = "game-over-standings";
+    const standingsTitle = document.createElement("h3");
+    standingsTitle.textContent = "Final standings";
+    const standingsList = document.createElement("ol");
+    standingsList.className = "game-over-standings-list";
+    let previousScore = null;
+    let place = 0;
+    standings.forEach((player, index) => {
+        if (player.money !== previousScore) place = index + 1;
+        previousScore = player.money;
+        const row = document.createElement("li");
+        row.className = `game-over-standing${player.money === highestScore ? " is-winner" : ""}`;
+        const placeLabel = document.createElement("span");
+        placeLabel.className = "game-over-place";
+        placeLabel.textContent = place === 1 ? "1st" : place === 2 ? "2nd" : place === 3 ? "3rd" : `${place}th`;
+        const name = document.createElement("span");
+        name.className = "game-over-player-name";
+        name.textContent = player.name;
+        const total = document.createElement("strong");
+        total.className = "game-over-player-total";
+        total.textContent = `$${player.money.toLocaleString()}`;
+        row.append(placeLabel, name, total);
+        standingsList.appendChild(row);
+    });
+    standingsSection.append(standingsTitle, standingsList);
+    results.appendChild(standingsSection);
     if (finalSettlement.length) {
         const details = document.createElement("details");
+        details.className = "game-over-payout-details";
         const summary = document.createElement("summary");
         summary.textContent = "Show final payouts";
         const payoutList = document.createElement("ul");
+        payoutList.className = "game-over-payout-list";
         for (const entry of finalSettlement) {
             const item = document.createElement("li");
             item.textContent = entry;
@@ -417,20 +450,26 @@ function renderGameOverResults() {
         details.append(summary, payoutList);
         results.appendChild(details);
     }
+    const newGameButton = document.createElement("button");
+    newGameButton.type = "button";
+    newGameButton.className = "game-over-new-game-button";
+    newGameButton.textContent = "Start a new game";
+    newGameButton.addEventListener("click", beginNewGame);
+    results.appendChild(newGameButton);
 }
 
-function endGame() {
-    if (gameOver || !gameEndConditionMet()) return;
-    if (!confirm("Are you sure you want to end the game and calculate the final scores?")) return;
+function endGame(options = {}) {
+    if (gameOver || !awaitingEndTurnChoice || !gameEndConditionMet()) return;
+    if (!options.confirmed && !confirm("Are you sure you want to end the game and calculate the final scores?")) return;
 
     gameOver = true;
+    awaitingEndTurnChoice = false;
     finalSettlement = [];
     pendingTurn = false;
     selectedTileName = null;
     mergerState = null;
     document.getElementById("stockPurchaseArea").style.display = "none";
     document.getElementById("mergerResolutionArea").style.display = "none";
-    document.getElementById("endGameButton").style.display = "none";
 
     // Final settlements are processed from the smallest active company to the largest.
     const activeCompanies = companies.filter(company => company.size > 0).sort((a, b) => a.size - b.size);
@@ -467,6 +506,7 @@ function endGame() {
 function takeTurn() {
     selectedTileName = null;
     pendingTurn = false;
+    awaitingEndTurnChoice = false;
     mergerState = null;
     document.getElementById("stockPurchaseArea").style.display = "none";
     document.getElementById("mergerResolutionArea").style.display = "none";
@@ -485,7 +525,7 @@ function takeTurn() {
 function onSelectTile(tileName) {
     const tile = gameBoard.find(item => item.name === tileName);
     const player = currentPlayer();
-    if (pendingTurn || !tile || !player || tile.ownership !== "hand" || tile.holderId !== player.id) return;
+    if (pendingTurn || awaitingEndTurnChoice || !tile || !player || tile.ownership !== "hand" || tile.holderId !== player.id) return;
     if (tile.playability === "unplayable") {
         document.getElementById("turnStatus").textContent = `${tileName} cannot be played because it would connect two safe companies.`;
         return;
@@ -794,7 +834,7 @@ function cheapestAvailableStockPrice() {
 async function placeTile(tileName) {
     const target = gameBoard.find(item => item.name === tileName);
     const player = currentPlayer();
-    if (!target || !player || !selectedTileName || tileName !== selectedTileName) return;
+    if (pendingTurn || awaitingEndTurnChoice || gameOver || !target || !player || !selectedTileName || tileName !== selectedTileName) return;
     if (target.ownership !== "hand" || target.holderId !== player.id) return;
     if (target.playability === "unplayable") {
         document.getElementById("turnStatus").textContent = `${tileName} is not a legal space: it would connect two safe companies.`;
@@ -944,7 +984,7 @@ function renderHand() {
         button.type = "button";
         button.className = "hand-tile";
         button.textContent = tileName;
-        button.disabled = gameOver || pendingTurn || tile?.playability === "unplayable";
+        button.disabled = gameOver || pendingTurn || awaitingEndTurnChoice || tile?.playability === "unplayable";
         const touchedCompanyNames = companiesTileWouldTouch(tileName);
         // One company means growth; multiple colors mean a merger; gray means a new company.
         if (touchedCompanyNames.length === 1) {
@@ -1077,7 +1117,6 @@ function renderEconomy() {
         card.append(name, stats, bonuses);
         companiesElement.appendChild(card);
     }
-    updateEndGameButton();
     updateSkipTurnButton();
     publishNetworkSnapshot();
 }
@@ -1085,7 +1124,7 @@ function renderEconomy() {
 // Keep the host override available only when advancing cannot interrupt a rule decision.
 function updateSkipTurnButton() {
     const button = document.getElementById("skipTurnButton");
-    if (button) button.disabled = !networkEnabled || !playerData.length || gameOver || Boolean(mergerState || remoteCompanyChoice);
+    if (button) button.disabled = !networkEnabled || !playerData.length || gameOver || awaitingEndTurnChoice || Boolean(mergerState || remoteCompanyChoice);
     const newGameButton = document.getElementById("newGameButton");
     if (newGameButton) newGameButton.disabled = Boolean(mergerState || remoteCompanyChoice);
 }
@@ -1132,6 +1171,8 @@ function makeNetworkSnapshot() {
         } : { type: "busy" };
     } else if (pendingTurn) {
         pending = { type: "buy", playerId: currentPlayerIndex };
+    } else if (awaitingEndTurnChoice) {
+        pending = { type: "endTurn", playerId: currentPlayerIndex, canDeclareGameOver: gameEndConditionMet() };
     }
     return {
         phase: gameOver ? "finished" : playerData.length ? "playing" : "lobby",
@@ -1166,7 +1207,7 @@ function resolveRemoteCompany(name) {
 
 async function handleRemoteAction(action) {
     if (action.type === "play") {
-        if (action.playerId !== currentPlayerIndex || pendingTurn || mergerState || remoteCompanyChoice) return;
+        if (action.playerId !== currentPlayerIndex || pendingTurn || awaitingEndTurnChoice || mergerState || remoteCompanyChoice) return;
         onSelectTile(action.tile);
         // placeTile may wait for a company choice from this same phone, so do not
         // hold the event handler open while that pending choice is displayed.
@@ -1183,6 +1224,12 @@ async function handleRemoteAction(action) {
             input.value = String(action.purchases?.find(item => item.company === input.dataset.company)?.quantity ?? 0);
         }
         finishTurn();
+        return;
+    }
+    if (action.type === "endTurn") {
+        if (!awaitingEndTurnChoice || action.playerId !== currentPlayerIndex) return;
+        if (action.choice === "declare") endGame({ confirmed: true });
+        else if (action.choice === "continue") advanceTurn();
         return;
     }
     if (action.type === "merger") {
@@ -1438,6 +1485,7 @@ function restoreSavedHostGame(saved) {
     companies.forEach(company => Object.assign(company, savedCompanies.get(company.name)));
     currentPlayerIndex = Number(saved.currentPlayerIndex);
     pendingTurn = Boolean(saved.pendingTurn);
+    awaitingEndTurnChoice = Boolean(saved.awaitingEndTurnChoice);
     gameOver = Boolean(saved.gameOver);
     finalSettlement = Array.isArray(saved.finalSettlement) ? [...saved.finalSettlement] : [];
     selectedTileName = null;
@@ -1477,6 +1525,8 @@ function restoreSavedHostGame(saved) {
     } else if (pendingTurn) {
         document.getElementById("turnStatus").textContent = `${currentPlayer().name}'s saved share purchase — finish the turn when ready.`;
         showStockPurchase();
+    } else if (awaitingEndTurnChoice) {
+        document.getElementById("turnStatus").textContent = `${currentPlayer().name} finished the turn. They may declare game over or draw a replacement tile.`;
     } else {
         document.getElementById("turnStatus").textContent = `${currentPlayer().name}'s turn has been restored.`;
     }
@@ -1562,6 +1612,7 @@ function renderPhone() {
         phoneSelectedCompany = null;
         phoneStockSelections = {};
         phoneMergerSelections = { sell: 0, tradeShares: 0 };
+        phoneGameOverConfirmation = false;
     }
     phoneFormContext = formContext;
     screen.replaceChildren();
@@ -1579,7 +1630,7 @@ function renderPhone() {
     const heading = phoneElement("section", "phone-panel");
     heading.appendChild(phoneElement("h2", "", player.name));
     const turnName = phoneState.players.find(item => item.id === phoneState.currentPlayerId)?.name;
-    heading.appendChild(phoneElement("p", "phone-status", phoneState.phase === "finished" ? `Game over${phoneState.winners.length ? ` — ${phoneState.winners.join(" and ")} won` : ""}` : phoneState.pending?.type === "merger" && phoneState.pending.playerId === player.id ? "Resolve the merger on your phone" : phoneState.pending?.type === "choice" && phoneState.pending.playerId === player.id ? phoneState.pending.title : phoneState.pending?.type === "buy" && phoneState.pending.playerId === player.id ? "Buy shares to finish your turn" : phoneState.currentPlayerId === player.id ? "Your turn" : `${turnName || "Waiting"} is taking their turn`));
+    heading.appendChild(phoneElement("p", "phone-status", phoneState.phase === "finished" ? `Game over${phoneState.winners.length ? ` — ${phoneState.winners.join(" and ")} won` : ""}` : phoneState.pending?.type === "merger" && phoneState.pending.playerId === player.id ? "Resolve the merger on your phone" : phoneState.pending?.type === "choice" && phoneState.pending.playerId === player.id ? phoneState.pending.title : phoneState.pending?.type === "buy" && phoneState.pending.playerId === player.id ? "Buy shares to finish your turn" : phoneState.pending?.type === "endTurn" && phoneState.pending.playerId === player.id ? "Your turn is complete. Choose whether to end the game or continue." : phoneState.currentPlayerId === player.id ? "Your turn" : `${turnName || "Waiting"} is taking their turn`));
     screen.appendChild(heading);
     const cashPanel = phoneElement("section", "phone-panel phone-cash-panel");
     cashPanel.append(phoneElement("span", "phone-cash-label", "Cash"), phoneElement("strong", "phone-cash-balance", `$${player.money.toLocaleString()}`));
@@ -1692,6 +1743,38 @@ function renderPhone() {
             purchases: availableCompanies.map(company => ({ company: company.name, quantity: phoneStockSelections[company.name] || 0 }))
         }));
         panel.appendChild(buy); screen.appendChild(panel);
+    } else if (pending?.type === "endTurn" && pending.playerId === player.id) {
+        const panel = phoneElement("section", "phone-panel phone-end-turn-panel");
+        panel.appendChild(phoneElement("h3", "", "Your turn is complete"));
+        panel.appendChild(phoneElement("p", "", "Choose whether to draw your replacement tile and continue, or end the game now."));
+        const continueButton = phoneElement("button", "", "Draw tile and continue");
+        continueButton.type = "button";
+        continueButton.disabled = phoneBusy;
+        continueButton.addEventListener("click", () => sendPhoneAction({ type: "endTurn", choice: "continue" }));
+        panel.appendChild(continueButton);
+        if (pending.canDeclareGameOver) {
+            const declareButton = phoneElement("button", "phone-declare-game-over", phoneGameOverConfirmation ? "Confirm game over" : "Declare game over");
+            declareButton.type = "button";
+            declareButton.disabled = phoneBusy;
+            declareButton.addEventListener("click", () => {
+                if (phoneGameOverConfirmation) {
+                    sendPhoneAction({ type: "endTurn", choice: "declare" });
+                } else {
+                    phoneGameOverConfirmation = true;
+                    renderPhone();
+                }
+            });
+            panel.appendChild(declareButton);
+            if (phoneGameOverConfirmation) {
+                panel.appendChild(phoneElement("p", "phone-game-over-confirmation", "End the game now? Final bonuses will be paid and shares sold."));
+                const cancel = phoneElement("button", "", "Keep playing");
+                cancel.type = "button";
+                cancel.disabled = phoneBusy;
+                cancel.addEventListener("click", () => { phoneGameOverConfirmation = false; renderPhone(); });
+                panel.appendChild(cancel);
+            }
+        }
+        screen.appendChild(panel);
     } else if (pending?.type === "merger" && pending.playerId === player.id) {
         const panel = phoneElement("section", "phone-panel");
         panel.appendChild(phoneElement("h3", "", `${companyDisplayName(pending.loser)} is absorbed by ${companyDisplayName(pending.survivor)}`));
@@ -1829,7 +1912,7 @@ function startNetworkHost() {
 
 // The host can move past an unplayed turn or forfeit the share purchase after a tile was placed.
 function skipCurrentTurn() {
-    if (!networkEnabled || !playerData.length || gameOver || mergerState || remoteCompanyChoice) return;
+    if (!networkEnabled || !playerData.length || gameOver || awaitingEndTurnChoice || mergerState || remoteCompanyChoice) return;
     const skippedPlayer = currentPlayer();
     if (!skippedPlayer) return;
 
@@ -1864,6 +1947,7 @@ function beginNewGame() {
     currentPlayerIndex = 0;
     selectedTileName = null;
     pendingTurn = false;
+    awaitingEndTurnChoice = false;
     mergerState = null;
     remoteCompanyChoice = null;
     gameOver = false;
@@ -1886,10 +1970,12 @@ function showStockPurchase() {
     const availableCompanies = availableStockCompanies();
     const cheapestPrice = cheapestAvailableStockPrice();
     if (!availableCompanies.length || cheapestPrice > player.money) {
-        advanceTurn();
+        if (gameEndConditionMet()) offerEndTurnChoice();
+        else advanceTurn();
         return;
     }
 
+    awaitingEndTurnChoice = false;
     pendingTurn = true;
     persistHostGame();
     const area = document.getElementById("stockPurchaseArea");
@@ -1924,6 +2010,16 @@ function showStockPurchase() {
     renderHand();
     persistHostGame();
     publishNetworkSnapshot();
+}
+
+function offerEndTurnChoice() {
+    pendingTurn = false;
+    awaitingEndTurnChoice = true;
+    document.getElementById("stockPurchaseArea").style.display = "none";
+    document.getElementById("turnStatus").textContent = `${currentPlayer().name} has completed the turn. They may declare game over or draw a replacement tile to continue.`;
+    renderHand();
+    renderEconomy();
+    persistHostGame();
 }
 
 // Recalculate the selected share count and cost as the player changes the quantity inputs.
@@ -1975,12 +2071,14 @@ function finishTurn() {
         player.shares[company.name] += quantity;
         company.sharesLeft -= quantity;
     }
-    advanceTurn();
+    if (gameEndConditionMet()) offerEndTurnChoice();
+    else advanceTurn();
 }
 
 // Draw a replacement tile for the player who just played, then activate the next player.
 function advanceTurn() {
     const player = currentPlayer();
+    awaitingEndTurnChoice = false;
     const replacement = unassignedTile();
     if (replacement) {
         const replacementTile = gameBoard.find(item => item.name === replacement);
@@ -1990,6 +2088,7 @@ function advanceTurn() {
     }
     currentPlayerIndex = (currentPlayerIndex + 1) % playerData.length;
     pendingTurn = false;
+    awaitingEndTurnChoice = false;
     mergerState = null;
     recalculatePlayability();
     renderEconomy();
@@ -2030,7 +2129,6 @@ document.getElementById("startGameButton").onclick = function() {
 // Connect the page's action buttons to the functions that handle their clicks.
 document.getElementById("finishTurnButton").onclick = finishTurn;
 document.getElementById("resolveMergerPlayerButton").onclick = resolveMergerPlayer;
-document.getElementById("endGameButton").onclick = endGame;
 document.getElementById("skipTurnButton").onclick = skipCurrentTurn;
 document.getElementById("newGameButton").onclick = beginNewGame;
 document.getElementById("toggleStocksButton").onclick = () => {
