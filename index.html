@@ -10,7 +10,8 @@
 <body>
     <!-- The JavaScript updates this heading when the game starts. -->
     <header>
-        <h1 id="title">Welcome to Acquire</h1>
+        <h1 id="title">Acquire: The Game Night Edition</h1>
+        <div id="networkRoomPanelHeaderAnchor"></div>
         <section id="networkRoomPanel" style="display: none" aria-label="Phone connections">
             <div class="lobby-content-grid">
                 <section class="lobby-join-card" aria-label="Join this game">
@@ -22,6 +23,10 @@
                         <strong id="networkRoomCodeDisplay">----</strong>
                     </div>
                     <div id="networkJoinLinks"></div>
+                    <figure id="networkWifiQr" class="lobby-wifi-qr" hidden>
+                        <div id="networkWifiQrImage"></div>
+                        <figcaption>Scan to join this game on Wi-Fi</figcaption>
+                    </figure>
                 </section>
                 <section class="lobby-roster-card" aria-label="Players in the lobby">
                     <div class="lobby-roster-heading">
@@ -54,10 +59,6 @@
         </div>
         <!-- The game screen stays hidden until Start Game is pressed. -->
         <div id="gameBoardScreen" style="display: none">
-            <!-- Live instructions tell the current player what action is expected. -->
-            <p id="turnStatus" aria-live="polite"></p>
-            <button id="skipTurnButton" type="button" disabled>Skip current turn</button>
-            <button id="newGameButton" type="button">New Game</button>
             <!-- Only appears when the game-end rule is met. -->
             <button id="endGameButton" type="button" style="display: none">Declare game over</button>
             <!-- Final score and payout details are filled in after confirmation. -->
@@ -65,23 +66,30 @@
                 <h2>Game over</h2>
                 <div id="gameOverResults"></div>
             </section>
-            <!-- JavaScript creates the 12-by-9 board buttons inside this container. -->
-            <div id="grid-container" class="container"></div>
+            <section id="boardTable" aria-label="Game board and table information">
+                <section id="companyPanel" class="board-side-panel" aria-label="Active companies">
+                    <h2>Active companies</h2>
+                    <div id="companySummary"></div>
+                </section>
+                <!-- JavaScript creates the 12-by-9 board buttons inside this container. -->
+                <div id="grid-container" class="container"></div>
+                <section id="playerPanel" class="board-side-panel" aria-label="Players">
+                    <h2>Players</h2>
+                    <div id="playerSummary"></div>
+                </section>
+            </section>
+            <!-- Live instructions tell the current player what action is expected. -->
+            <p id="turnStatus" aria-live="polite"></p>
+            <div id="hostTurnControls">
+                <button id="toggleStocksButton" type="button" aria-pressed="false">Close stocks</button>
+                <button id="skipTurnButton" type="button" disabled>Skip current turn</button>
+                <button id="newGameButton" type="button">New Game</button>
+            </div>
+            <div id="networkRoomPanelGameAnchor"></div>
             <!-- The current player's private tiles are shown here. -->
             <section id="handArea" aria-label="Current player's tiles">
                 <h2>Your tiles</h2>
                 <div id="playerHand"></div>
-            </section>
-            <!-- Public information: players' cash/shares and active company sizes/prices. -->
-            <section id="economyArea" aria-label="Player and company information">
-                <div>
-                    <h2>Players</h2>
-                    <div id="playerSummary"></div>
-                </div>
-                <div>
-                    <h2>Active companies</h2>
-                    <div id="companySummary"></div>
-                </div>
             </section>
             <!-- This optional phase appears after a successful tile placement. -->
             <section id="stockPurchaseArea" style="display: none" aria-label="Buy company shares">
@@ -120,6 +128,7 @@
         <p>&copy; 2025 Acquire Banking App. All rights reserved.</p>
     </footer>
     <!-- Load game logic after the page elements so JavaScript can find them by ID. -->
+    <script src="qrcode.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

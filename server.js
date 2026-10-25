@@ -175,7 +175,7 @@ function validateAction(room, player, action) {
 function staticFile(req, res) {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const file = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-  if (!['index.html', 'script.js', 'style.css'].includes(file)) {
+  if (!['index.html', 'script.js', 'style.css', 'qrcode.min.js'].includes(file)) {
     res.writeHead(404); res.end('Not found.'); return;
   }
   const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };

@@ -46,6 +46,7 @@ let phoneRenderDeferred = false;
 let remoteCompanyChoice = null;
 let networkPublishTimer = null;
 let networkSnapshotRevision = 0;
+let hostStocksClosed = false;
 
 // These colors are shared by board tiles, hand previews, and company markers.
 const companyColors = {
@@ -976,9 +977,56 @@ function renderEconomy() {
     playersElement.innerHTML = "";
     for (const player of playerData) {
         const card = document.createElement("div");
-        card.className = "summary-card";
-        const holdings = Object.entries(player.shares).filter(([, count]) => count > 0).map(([name, count]) => `${companyDisplayName(name)}: ${count}`).join(", ") || "none";
-        card.textContent = `${player.name}${player.id === currentPlayerIndex ? " (current)" : ""} — $${player.money} — shares: ${holdings}`;
+        const isCurrent = player.id === currentPlayerIndex;
+        card.className = `summary-card player-card${isCurrent ? " is-current" : ""}`;
+
+        const heading = document.createElement("h3");
+        heading.className = "player-card-name";
+        heading.textContent = player.name;
+        if (isCurrent) {
+            const turnLabel = document.createElement("span");
+            turnLabel.className = "player-turn-label";
+            turnLabel.textContent = "CURRENT TURN";
+            heading.appendChild(turnLabel);
+        }
+
+        const cash = document.createElement("div");
+        cash.className = "player-cash-stat";
+        const cashLabel = document.createElement("span");
+        cashLabel.textContent = "Cash";
+        const cashValue = document.createElement("strong");
+        cashValue.textContent = `$${player.money.toLocaleString()}`;
+        cash.append(cashLabel, cashValue);
+
+        const sharesSection = document.createElement("div");
+        sharesSection.className = "player-shares-section";
+        const sharesHeading = document.createElement("span");
+        sharesHeading.className = "player-shares-heading";
+        sharesHeading.textContent = "Shares";
+        const holdings = document.createElement("div");
+        holdings.className = "player-share-chips";
+        const ownedShares = Object.entries(player.shares).filter(([, count]) => count > 0);
+        if (ownedShares.length) {
+            for (const [companyName, count] of ownedShares) {
+                const chip = document.createElement("span");
+                chip.className = "player-share-chip";
+                chip.style.setProperty("--company-color", companyColors[companyName]);
+                chip.textContent = `${companyDisplayName(companyName)} · ${count}`;
+                holdings.appendChild(chip);
+            }
+        } else {
+            const empty = document.createElement("span");
+            empty.className = "player-no-shares";
+            empty.textContent = "No shares yet";
+            holdings.appendChild(empty);
+        }
+        sharesSection.append(sharesHeading, holdings);
+        const stocksClosedMessage = document.createElement("div");
+        stocksClosedMessage.className = "player-stocks-closed";
+        stocksClosedMessage.textContent = "Closed stocks";
+        sharesSection.hidden = hostStocksClosed;
+        stocksClosedMessage.hidden = !hostStocksClosed;
+        card.append(heading, cash, sharesSection, stocksClosedMessage);
         playersElement.appendChild(card);
     }
     companiesElement.innerHTML = "";
@@ -986,14 +1034,47 @@ function renderEconomy() {
     if (!activeCompanies.length) companiesElement.textContent = "No companies have been started.";
     for (const company of activeCompanies) {
         const card = document.createElement("div");
-        card.className = "summary-card";
-        const marker = document.createElement("span");
-        marker.className = "company-color-dot";
-        marker.style.backgroundColor = companyColors[company.name];
-        marker.setAttribute("aria-hidden", "true");
-        const details = document.createElement("span");
-        details.textContent = `${companyDisplayName(company.name)} — ${company.size} tiles — $${company.price}/share — ${company.sharesLeft} shares left`;
-        card.append(marker, details);
+        card.className = "summary-card company-card";
+        card.style.setProperty("--company-color", companyColors[company.name]);
+
+        const name = document.createElement("h3");
+        name.className = "company-card-name";
+        name.textContent = companyDisplayName(company.name);
+
+        const stats = document.createElement("div");
+        stats.className = "company-card-stats";
+        for (const [label, value] of [
+            ["Tiles", company.size],
+            ["Share price", `$${company.price}`],
+            ["Shares left", company.sharesLeft]
+        ]) {
+            const stat = document.createElement("div");
+            stat.className = "company-stat";
+            const statValue = document.createElement("strong");
+            statValue.textContent = value;
+            const statLabel = document.createElement("span");
+            statLabel.textContent = label;
+            stat.append(statValue, statLabel);
+            stats.appendChild(stat);
+        }
+
+        const bonuses = document.createElement("div");
+        bonuses.className = "company-bonus-stats";
+        for (const [label, value] of [
+            ["Majority bonus", company.majority],
+            ["Minority bonus", company.minority]
+        ]) {
+            const bonus = document.createElement("div");
+            bonus.className = "company-bonus";
+            const bonusLabel = document.createElement("span");
+            bonusLabel.textContent = label;
+            const bonusValue = document.createElement("strong");
+            bonusValue.textContent = `$${value.toLocaleString()}`;
+            bonus.append(bonusLabel, bonusValue);
+            bonuses.appendChild(bonus);
+        }
+
+        card.append(name, stats, bonuses);
         companiesElement.appendChild(card);
     }
     updateEndGameButton();
@@ -1126,6 +1207,9 @@ function updateHostRoomPanel(room) {
         const online = remotePlayers.filter(player => player.connected).length;
         const lobby = !playerData.length && !gameOver;
         document.body.classList.toggle("network-game-active", Boolean(playerData.length));
+        const roomPanel = document.getElementById("networkRoomPanel");
+        const panelAnchor = document.getElementById(playerData.length ? "networkRoomPanelGameAnchor" : "networkRoomPanelHeaderAnchor");
+        if (roomPanel && panelAnchor && panelAnchor.nextElementSibling !== roomPanel) panelAnchor.after(roomPanel);
         players.hidden = !lobby;
         if (lobby) {
             const signature = remotePlayers.map(player => `${player.id}:${player.name}`).join("|");
@@ -1196,6 +1280,29 @@ function updateHostRoomPanel(room) {
     }
 }
 
+// Build the Wi-Fi join QR locally so it works without an internet connection.
+function renderHostWifiQrCode(url, roomCode) {
+    const panel = document.getElementById("networkWifiQr");
+    const imageContainer = document.getElementById("networkWifiQrImage");
+    if (!panel || !imageContainer) return;
+    imageContainer.replaceChildren();
+    panel.hidden = true;
+    if (!url || typeof qrcode !== "function") return;
+
+    try {
+        const qr = qrcode(0, "M");
+        qr.addData(url);
+        qr.make();
+        const image = document.createElement("img");
+        image.src = qr.createDataURL(6, 4);
+        image.alt = `QR code for the Wi-Fi join link to room ${roomCode}`;
+        imageContainer.appendChild(image);
+        panel.hidden = false;
+    } catch (error) {
+        console.error("Could not create the Wi-Fi join QR code.", error);
+    }
+}
+
 async function kickLobbyPlayer(player, button) {
     if (playerData.length || gameOver || button.disabled) return;
     const actionStatus = document.getElementById("networkActionStatus");
@@ -1261,6 +1368,11 @@ async function startHostNetwork() {
         if (!restoreWarning) status.textContent = "Share a link for a network connection below.";
         const links = document.getElementById("networkJoinLinks");
         links.replaceChildren();
+        const wifiAddress = room.addresses.find(address => /wi.?fi|wireless|wlan/i.test(String(address.name || "")));
+        renderHostWifiQrCode(
+            wifiAddress ? `http://${wifiAddress.address}:${room.port}/?join=${room.code}` : "",
+            room.code
+        );
         for (const address of room.addresses) {
             const link = document.createElement("a");
             link.href = `http://${address.address}:${room.port}/?join=${room.code}`;
@@ -1387,6 +1499,18 @@ async function phoneRequest(path, data) {
     return result;
 }
 
+function appendPhoneConnectionFooter(screen) {
+    const statusText = phoneBusy
+        ? "Waiting for the laptop to apply your action…"
+        : phoneState?.hostConnected
+            ? "Connected to laptop host"
+            : "Reconnecting to laptop host";
+    const connection = phoneElement("p", "phone-host-connection", statusText);
+    connection.id = "phoneConnectionStatus";
+    const roomCode = phoneElement("p", "phone-room-code", `Room code: ${networkRoomCode}`);
+    screen.append(connection, roomCode);
+}
+
 function renderPhoneJoin(errorText = "") {
     const screen = document.getElementById("phoneScreen");
     screen.replaceChildren();
@@ -1445,21 +1569,35 @@ function renderPhone() {
     const player = phoneState.self;
     if (phoneState.phase === "lobby") {
         const lobby = phoneElement("section", "phone-panel");
-        lobby.append(phoneElement("h2", "", player?.name || "Player connected"), phoneElement("p", "", `Room ${networkRoomCode}`));
-        lobby.appendChild(phoneElement("p", "phone-status", phoneState.hostConnected ? "Connected. Waiting for the host to start the game." : "The host page is reconnecting. Your seat is saved."));
+        lobby.appendChild(phoneElement("h2", "", player?.name || "Player connected"));
+        lobby.appendChild(phoneElement("p", "phone-status", phoneState.hostConnected ? "Waiting for the host to start the game." : "Your seat is saved while the host reconnects."));
         screen.appendChild(lobby);
+        appendPhoneConnectionFooter(screen);
         return;
     }
     if (!player) return renderPhoneJoin("This phone is not connected to a player seat.");
     const heading = phoneElement("section", "phone-panel");
-    heading.append(phoneElement("h2", "", player.name), phoneElement("p", "", `Room ${networkRoomCode} · $${player.money.toLocaleString()}`));
+    heading.appendChild(phoneElement("h2", "", player.name));
     const turnName = phoneState.players.find(item => item.id === phoneState.currentPlayerId)?.name;
     heading.appendChild(phoneElement("p", "phone-status", phoneState.phase === "finished" ? `Game over${phoneState.winners.length ? ` — ${phoneState.winners.join(" and ")} won` : ""}` : phoneState.pending?.type === "merger" && phoneState.pending.playerId === player.id ? "Resolve the merger on your phone" : phoneState.pending?.type === "choice" && phoneState.pending.playerId === player.id ? phoneState.pending.title : phoneState.pending?.type === "buy" && phoneState.pending.playerId === player.id ? "Buy shares to finish your turn" : phoneState.currentPlayerId === player.id ? "Your turn" : `${turnName || "Waiting"} is taking their turn`));
     screen.appendChild(heading);
+    const cashPanel = phoneElement("section", "phone-panel phone-cash-panel");
+    cashPanel.append(phoneElement("span", "phone-cash-label", "Cash"), phoneElement("strong", "phone-cash-balance", `$${player.money.toLocaleString()}`));
+    screen.appendChild(cashPanel);
     const portfolio = phoneElement("section", "phone-panel");
     portfolio.appendChild(phoneElement("h3", "", "Your shares"));
-    const holdings = Object.entries(player.shares || {}).filter(([, count]) => count > 0).map(([name, count]) => `${companyDisplayName(name)}: ${count}`);
-    portfolio.appendChild(phoneElement("p", "", holdings.join(" · ") || "No shares yet"));
+    const holdings = phoneElement("div", "phone-share-chips");
+    const ownedShares = Object.entries(player.shares || {}).filter(([, count]) => count > 0);
+    if (ownedShares.length) {
+        for (const [name, count] of ownedShares) {
+            const chip = phoneElement("span", "phone-share-chip", `${companyDisplayName(name)} · ${count}`);
+            chip.style.setProperty("--company-color", companyColors[name] || "#7892b0");
+            holdings.appendChild(chip);
+        }
+    } else {
+        holdings.appendChild(phoneElement("span", "phone-no-shares", "No shares yet"));
+    }
+    portfolio.appendChild(holdings);
     screen.appendChild(portfolio);
     const handPanel = phoneElement("section", "phone-panel");
     const tileInstruction = !phoneState.canPlay
@@ -1602,8 +1740,8 @@ function renderPhone() {
         panel.appendChild(confirm); screen.appendChild(panel);
     }
     if (phoneState.phase === "lobby") screen.appendChild(phoneElement("section", "phone-panel", "You are connected. Waiting for the host to start the game."));
-    const connected = phoneElement("p", "", phoneBusy ? "Waiting for the laptop to apply your action…" : "Connected to the laptop host"); connected.id = "phoneConnectionStatus"; screen.appendChild(connected);
     if (phoneError) screen.appendChild(phoneElement("p", "phone-error", phoneError));
+    appendPhoneConnectionFooter(screen);
 }
 
 async function sendPhoneAction(action) {
@@ -1736,7 +1874,7 @@ function beginNewGame() {
     document.getElementById("mergerResolutionArea").style.display = "none";
     document.getElementById("startScreen").style.display = "block";
     document.getElementById("gameBoardScreen").style.display = "none";
-    title.textContent = "Welcome to Acquire";
+    title.textContent = "Acquire: The Game Night Edition";
     persistHostRoomSession(remotePlayers);
     renderEconomy();
     updateHostRoomPanel({ players: remotePlayers });
@@ -1881,7 +2019,7 @@ document.getElementById("startGameButton").onclick = function() {
     if (!initiatePlayerData()) {
         document.getElementById("startScreen").style.display = "block";
         document.getElementById("gameBoardScreen").style.display = "none";
-        title.innerText = "Welcome to Acquire";
+        title.innerText = "Acquire: The Game Night Edition";
         return;
     }
     syncCompanySizes();
@@ -1895,6 +2033,15 @@ document.getElementById("resolveMergerPlayerButton").onclick = resolveMergerPlay
 document.getElementById("endGameButton").onclick = endGame;
 document.getElementById("skipTurnButton").onclick = skipCurrentTurn;
 document.getElementById("newGameButton").onclick = beginNewGame;
+document.getElementById("toggleStocksButton").onclick = () => {
+    hostStocksClosed = !hostStocksClosed;
+    const button = document.getElementById("toggleStocksButton");
+    button.textContent = hostStocksClosed ? "Open stocks" : "Close stocks";
+    button.setAttribute("aria-pressed", String(hostStocksClosed));
+    document.querySelectorAll("#playerSummary .player-shares-section, #playerSummary .player-stocks-closed").forEach(element => {
+        element.hidden = element.classList.contains("player-shares-section") ? hostStocksClosed : !hostStocksClosed;
+    });
+};
 
 if (isPhoneClient) startPhoneClient();
 else startNetworkHost();
